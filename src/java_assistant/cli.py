@@ -1,9 +1,15 @@
 from collections.abc import Callable
+import os
 from pathlib import Path
 from typing import Protocol
 
 from .config import AppConfig
+from .java.toolchain import JavaToolchain
+from .model.client import LocalHttpTransport, ModelClient
+from .model.runtime import LlamaRuntime, RuntimeConfig
+from .pdf.extract import PdfExtractor
 from .session import SessionReply
+from .session import AssistantSession
 
 
 InputFn = Callable[[str], str]
@@ -41,7 +47,46 @@ def run_cli(
 
 
 def main() -> int:
-    return run_cli(AppConfig.load(Path.cwd()))
+    config = AppConfig.load(Path.cwd())
+    app_home_value = os.environ.get("JAVA_ASSISTANT_HOME")
+    if not app_home_value:
+        print("Instalação incompleta: JAVA_ASSISTANT_HOME não foi definido.")
+        return 2
+    app_home = Path(app_home_value).resolve()
+    runtime = LlamaRuntime(
+        RuntimeConfig(
+            executable=app_home / "bin" / "llama-server",
+            model=app_home / "model" / "model.gguf",
+        )
+    )
+    session: AssistantSession | None = None
+    try:
+        runtime.start()
+        assert runtime.port is not None
+        session = AssistantSession(
+            config=config,
+            model=ModelClient(LocalHttpTransport(runtime.port)),
+            pdf_extractor=PdfExtractor(
+                pdftotext=app_home / "tools" / "poppler" / "bin" / "pdftotext",
+                pdftoppm=app_home / "tools" / "poppler" / "bin" / "pdftoppm",
+                tesseract=app_home / "tools" / "tesseract" / "bin" / "tesseract",
+            ),
+            toolchain=JavaToolchain(
+                config.project_root,
+                javac=app_home / "tools" / "jdk" / "bin" / "javac",
+                java=app_home / "tools" / "jdk" / "bin" / "java",
+                javap=app_home / "tools" / "jdk" / "bin" / "javap",
+            ),
+            criteria_template=app_home / "share" / "CRITERIOS_GERAIS.md",
+        )
+        return run_cli(config, session=session)
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"Não foi possível iniciar o assistente: {error}")
+        return 2
+    finally:
+        if session is not None:
+            session.close()
+        runtime.stop()
 
 
 if __name__ == "__main__":

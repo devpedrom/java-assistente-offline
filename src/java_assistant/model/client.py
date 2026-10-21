@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+import json
 from typing import Any
+from urllib.request import Request, urlopen
 
 
 class ModelProtocolError(RuntimeError):
@@ -16,6 +18,34 @@ class Message:
 @dataclass(frozen=True, slots=True)
 class ModelReply:
     content: str
+
+
+class LocalHttpTransport:
+    """OpenAI-compatible transport hard-wired to the local llama-server."""
+
+    def __init__(self, port: int, *, opener: Callable[..., Any] = urlopen) -> None:
+        if port < 1 or port > 65535:
+            raise ValueError("Porta local inválida.")
+        self._url = f"http://127.0.0.1:{port}/v1/chat/completions"
+        self._opener = opener
+
+    def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = dict(payload)
+        body.setdefault("temperature", 0.1)
+        request = Request(
+            self._url,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with self._opener(request, timeout=120) as response:
+                decoded = json.loads(response.read().decode("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ModelProtocolError(f"Falha na comunicação com o modelo local: {error}") from error
+        if not isinstance(decoded, dict):
+            raise ModelProtocolError("O modelo local retornou uma resposta inválida.")
+        return decoded
 
 
 class ModelClient:
