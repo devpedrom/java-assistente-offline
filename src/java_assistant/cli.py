@@ -1,13 +1,24 @@
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from .config import AppConfig
+from .session import SessionReply
 
 
 InputFn = Callable[[str], str]
 
 
-def run_cli(config: AppConfig, input_fn: InputFn = input) -> int:
+class SessionLike(Protocol):
+    def handle(self, text: str) -> SessionReply: ...
+
+
+def run_cli(
+    config: AppConfig,
+    input_fn: InputFn = input,
+    *,
+    session: SessionLike | None = None,
+) -> int:
     print(f"Assistente Java POO - projeto: {config.project_root}")
     while True:
         try:
@@ -15,10 +26,18 @@ def run_cli(config: AppConfig, input_fn: InputFn = input) -> int:
         except (EOFError, KeyboardInterrupt, StopIteration):
             return 0
 
-        if text.casefold() in {"/sair", "sair"}:
+        if session is None:
+            if text.casefold() in {"/sair", "sair"}:
+                return 0
+            if text:
+                print("Modelo local ainda não iniciado.")
+            continue
+
+        reply = session.handle(text)
+        if reply.text:
+            print(reply.text)
+        if reply.exit_requested:
             return 0
-        if text:
-            print("Modelo local ainda nao iniciado.")
 
 
 def main() -> int:

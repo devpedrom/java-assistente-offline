@@ -6,6 +6,7 @@ import unittest
 
 from java_assistant.cli import run_cli
 from java_assistant.config import AppConfig
+from java_assistant.session import SessionReply
 
 
 class SequenceInput:
@@ -19,6 +20,28 @@ class SequenceInput:
 
 
 class CliTests(unittest.TestCase):
+    def test_routes_commands_through_session_and_prints_reply(self) -> None:
+        class FakeSession:
+            def __init__(self) -> None:
+                self.received: list[str] = []
+
+            def handle(self, text: str) -> SessionReply:
+                self.received.append(text)
+                return SessionReply("resposta pronta", text == "/sair")
+
+        with TemporaryDirectory() as temp_dir:
+            config = AppConfig.load(Path(temp_dir))
+            input_fn = SequenceInput(["/pdf", "/sair"])
+            session = FakeSession()
+            output = StringIO()
+
+            with redirect_stdout(output):
+                result = run_cli(config, input_fn, session=session)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(session.received, ["/pdf", "/sair"])
+            self.assertIn("resposta pronta", output.getvalue())
+
     def test_plain_text_keeps_chat_open_until_exit_command(self) -> None:
         with TemporaryDirectory() as temp_dir:
             config = AppConfig.load(Path(temp_dir))
