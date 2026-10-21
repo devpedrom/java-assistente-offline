@@ -74,6 +74,8 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertNotIn('ARTIFACTS_DIR/python', builder)
         self.assertIn('ARTIFACTS_DIR/llama/llama-server', builder)
+        self.assertIn('ARTIFACTS_DIR/native/bin/pdftotext', builder)
+        self.assertIn('ARTIFACTS_DIR/native/bin/javac', builder)
         runtime_launcher = (
             ROOT / "packaging" / "linux" / "java-assistente"
         ).read_text(encoding="utf-8")

@@ -67,15 +67,15 @@ def main() -> int:
             config=config,
             model=ModelClient(LocalHttpTransport(runtime.port)),
             pdf_extractor=PdfExtractor(
-                pdftotext=app_home / "tools" / "poppler" / "bin" / "pdftotext",
-                pdftoppm=app_home / "tools" / "poppler" / "bin" / "pdftoppm",
-                tesseract=app_home / "tools" / "tesseract" / "bin" / "tesseract",
+                pdftotext=app_home / "tools" / "native" / "bin" / "pdftotext",
+                pdftoppm=app_home / "tools" / "native" / "bin" / "pdftoppm",
+                tesseract=app_home / "tools" / "native" / "bin" / "tesseract",
             ),
             toolchain=JavaToolchain(
                 config.project_root,
-                javac=app_home / "tools" / "jdk" / "bin" / "javac",
-                java=app_home / "tools" / "jdk" / "bin" / "java",
-                javap=app_home / "tools" / "jdk" / "bin" / "javap",
+                javac=app_home / "tools" / "native" / "bin" / "javac",
+                java=app_home / "tools" / "native" / "bin" / "java",
+                javap=app_home / "tools" / "native" / "bin" / "javap",
             ),
             criteria_template=app_home / "share" / "CRITERIOS_GERAIS.md",
         )

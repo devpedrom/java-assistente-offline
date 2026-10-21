@@ -3,9 +3,9 @@ set -eu
 APP_HOME=${JAVA_ASSISTANT_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 export JAVA_ASSISTANT_HOME="$APP_HOME"
 export PYTHONPATH="$APP_HOME/app"
-export PATH="$APP_HOME/tools/jdk/bin:$PATH"
-export LD_LIBRARY_PATH="$APP_HOME/tools/llama:$APP_HOME/tools/poppler/lib:$APP_HOME/tools/tesseract/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export TESSDATA_PREFIX="$APP_HOME/tools/tesseract/share/tessdata"
+export PATH="$APP_HOME/tools/native/bin:$PATH"
+export LD_LIBRARY_PATH="$APP_HOME/tools/llama:$APP_HOME/tools/native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export TESSDATA_PREFIX="$APP_HOME/tools/native/share/tessdata"
 PYTHON=$(command -v python3 || true)
 if [ -z "$PYTHON" ]; then
     echo "Python 3 não encontrado; esta versão do Linux Mint não é compatível." >&2
