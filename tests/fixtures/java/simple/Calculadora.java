@@ -8,4 +8,8 @@ public class Calculadora {
     public int somar(int outro) {
         return valor + outro;
     }
+
+    public String ecoar(String texto) {
+        return texto;
+    }
 }

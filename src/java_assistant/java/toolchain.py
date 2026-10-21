@@ -68,7 +68,9 @@ class JavaToolchain:
 
     def _source(self, relative: Path) -> Path:
         value = Path(relative)
-        candidate = value.resolve(strict=True) if value.is_absolute() else (self.root / value).resolve(strict=True)
+        if value.is_absolute():
+            raise ValueError("A fonte Java precisa usar um caminho relativo ao projeto.")
+        candidate = (self.root / value).resolve(strict=True)
         try:
             candidate.relative_to(self.root)
         except ValueError as exc:

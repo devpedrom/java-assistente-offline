@@ -11,7 +11,7 @@ def discover_pdfs(root: Path) -> list[Path]:
         (
             item
             for item in resolved.iterdir()
-            if item.is_file() and item.suffix.casefold() == ".pdf"
+            if item.is_file() and not item.is_symlink() and item.suffix.casefold() == ".pdf"
         ),
         key=lambda item: (item.name.casefold(), item.name),
     )

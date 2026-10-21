@@ -76,15 +76,18 @@ class AssistantSession:
 
     def _relevant_files(self) -> dict[str, str]:
         selected: dict[str, str] = {}
+        remaining = 6_000
         for path in sorted(self.config.project_root.rglob("*.java")):
-            if len(selected) >= 8:
+            if len(selected) >= 6 or remaining <= 0:
                 break
             try:
                 relative = path.resolve(strict=True).relative_to(self.config.project_root)
                 content = self.workspace.read(relative)
             except (OSError, ValueError):
                 continue
-            selected[str(relative)] = content[:20_000]
+            excerpt = content[:remaining]
+            selected[str(relative)] = excerpt
+            remaining -= len(excerpt)
         return selected
 
     def _list_pdfs(self) -> SessionReply:
@@ -231,12 +234,13 @@ class AssistantSession:
         messages = build_context(
             criteria=load_criteria(self.config),
             contract=self._contract_text(),
-            memory_summary=self._store.summary(),
+            memory_summary=self._store.summary(max_chars=1_500),
             relevant_files=self._relevant_files(),
             user_request=text,
         )
         messages[0] = Message("system", messages[0].content + "\n\n" + _ACTION_PROTOCOL)
         actions_used = 0
+        consecutive_failures = 0
         while True:
             reply = self.model.complete(messages)
             try:
@@ -244,9 +248,9 @@ class AssistantSession:
             except ActionValidationError:
                 self._store.remember("assistant", reply.content)
                 return SessionReply(reply.content)
-            if actions_used >= 3:
+            if actions_used >= 12:
                 return SessionReply(
-                    "Parei após três ações automáticas para evitar alterações repetitivas. "
+                    "Parei após doze ações neste pedido para evitar um ciclo do modelo. "
                     "Revise o estado e peça para continuar."
                 )
             actions_used += 1
@@ -254,7 +258,16 @@ class AssistantSession:
                 result = self._execute_action(action)
             except (OSError, ValueError, PatchMismatchError, RuntimeError) as exc:
                 result = f"AÇÃO RECUSADA OU FALHOU: {exc}"
-            messages.append(Message("assistant", reply.content))
+            failed = result.startswith(("Falha", "AÇÃO RECUSADA", "Execução falhou"))
+            consecutive_failures = consecutive_failures + 1 if failed else 0
+            if consecutive_failures >= 3:
+                return SessionReply(
+                    "Parei após três falhas consecutivas. Revise o diagnóstico e peça para continuar."
+                )
+            path_hint = action.args.get("path", "")
+            messages.append(
+                Message("assistant", f"Ação solicitada: {action.tool} {path_hint}".strip())
+            )
             messages.append(Message("user", f"RESULTADO DA AÇÃO:\n{result}"))
 
     def handle(self, text: str) -> SessionReply:

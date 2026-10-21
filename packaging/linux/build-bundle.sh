@@ -17,24 +17,22 @@ require_path() {
     fi
 }
 
-require_path "$ARTIFACTS_DIR/python"
-require_path "$ARTIFACTS_DIR/llama-server"
+require_path "$ARTIFACTS_DIR/llama/llama-server"
 require_path "$ARTIFACTS_DIR/model.gguf"
 require_path "$ARTIFACTS_DIR/jdk"
 require_path "$ARTIFACTS_DIR/poppler"
 require_path "$ARTIFACTS_DIR/tesseract"
 
 mkdir -p "$STAGING/runtime/bin" "$STAGING/runtime/app" "$STAGING/runtime/share" "$STAGING/runtime/tools"
-cp -a "$ARTIFACTS_DIR/python" "$STAGING/runtime/python"
 cp -a "$ARTIFACTS_DIR/jdk" "$STAGING/runtime/tools/jdk"
 cp -a "$ARTIFACTS_DIR/poppler" "$STAGING/runtime/tools/poppler"
 cp -a "$ARTIFACTS_DIR/tesseract" "$STAGING/runtime/tools/tesseract"
-cp "$ARTIFACTS_DIR/llama-server" "$STAGING/runtime/bin/llama-server"
+cp -a "$ARTIFACTS_DIR/llama" "$STAGING/runtime/tools/llama"
 cp -a "$PROJECT_ROOT/src/java_assistant" "$STAGING/runtime/app/java_assistant"
 cp "$PROJECT_ROOT/instructions/CRITERIOS_GERAIS.md" "$STAGING/runtime/share/CRITERIOS_GERAIS.md"
 cp "$SCRIPT_DIR/java-assistente" "$STAGING/runtime/bin/java-assistente"
 cp "$SCRIPT_DIR/desinstalar.sh" "$STAGING/runtime/bin/desinstalar"
-chmod +x "$STAGING/runtime/bin/llama-server" "$STAGING/runtime/bin/java-assistente" "$STAGING/runtime/bin/desinstalar"
+chmod +x "$STAGING/runtime/tools/llama/llama-server" "$STAGING/runtime/bin/java-assistente" "$STAGING/runtime/bin/desinstalar"
 
 rm -rf -- "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"

@@ -41,7 +41,7 @@ class ContractValidator:
             if inspected.returncode != 0:
                 issues.append(f"Classe ausente: {expected_class.name}")
                 continue
-            output = " ".join(inspected.stdout.split())
+            output = " ".join(inspected.stdout.split()).replace("java.lang.", "")
             for field in expected_class.fields:
                 fragment = f"{field.visibility} {field.type_name} {field.name};"
                 if fragment not in output:
@@ -55,7 +55,7 @@ class ContractValidator:
             if relationship.kind != "inheritance" or relationship.confidence < 0.9:
                 continue
             inspected = self.toolchain.inspect(relationship.child)
-            declaration = " ".join(inspected.stdout.split())
+            declaration = " ".join(inspected.stdout.split()).replace("java.lang.", "")
             if f"extends {relationship.parent}" not in declaration:
                 issues.append(
                     f"Herança ausente: {relationship.child} deve estender {relationship.parent}"

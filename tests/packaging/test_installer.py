@@ -50,12 +50,35 @@ def make_bundle(bundle: Path, version: str) -> None:
 
 
 class InstallerTests(unittest.TestCase):
+    def test_all_linux_launchers_use_lf_and_have_shebang(self) -> None:
+        scripts = [
+            ROOT / "packaging" / "linux" / "instalar.sh",
+            ROOT / "packaging" / "linux" / "build-bundle.sh",
+            ROOT / "packaging" / "linux" / "desinstalar.sh",
+            ROOT / "packaging" / "linux" / "java-assistente",
+            ROOT / "tests" / "acceptance" / "run-offline.sh",
+        ]
+        for script in scripts:
+            content = script.read_bytes()
+            self.assertTrue(content.startswith(b"#!/bin/sh\n"), script)
+            self.assertNotIn(b"\r\n", content, script)
+
     def test_installer_has_no_network_or_privileged_commands(self) -> None:
         script = INSTALLER.read_text(encoding="utf-8")
         for forbidden in ("sudo ", "curl ", "wget ", "apt ", "dnf "):
             self.assertNotIn(forbidden, script)
         self.assertIn("sha256sum -c", script)
         self.assertIn("JAVA_ASSISTANT_NO_START", script)
+        builder = (ROOT / "packaging" / "linux" / "build-bundle.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('ARTIFACTS_DIR/python', builder)
+        self.assertIn('ARTIFACTS_DIR/llama/llama-server', builder)
+        runtime_launcher = (
+            ROOT / "packaging" / "linux" / "java-assistente"
+        ).read_text(encoding="utf-8")
+        self.assertIn("LD_LIBRARY_PATH", runtime_launcher)
+        self.assertIn("TESSDATA_PREFIX", runtime_launcher)
 
     @unittest.skipUnless(
         os.name != "nt" and posix_shell(),

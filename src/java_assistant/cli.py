@@ -55,7 +55,7 @@ def main() -> int:
     app_home = Path(app_home_value).resolve()
     runtime = LlamaRuntime(
         RuntimeConfig(
-            executable=app_home / "bin" / "llama-server",
+            executable=app_home / "tools" / "llama" / "llama-server",
             model=app_home / "model" / "model.gguf",
         )
     )

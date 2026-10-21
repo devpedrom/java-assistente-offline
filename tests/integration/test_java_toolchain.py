@@ -11,6 +11,10 @@ FIXTURE = Path(__file__).parents[1] / "fixtures" / "java" / "simple"
 
 
 class JavaToolchainIntegrationTests(unittest.TestCase):
+    def test_rejects_absolute_source_even_when_it_is_inside_project(self) -> None:
+        with self.assertRaisesRegex(ValueError, "relativo"):
+            JavaToolchain(FIXTURE).compile([(FIXTURE / "Main.java").resolve()])
+
     def test_compiles_with_java_8_target_and_runs_formula(self) -> None:
         toolchain = JavaToolchain(FIXTURE)
 
@@ -44,6 +48,7 @@ class JavaToolchainIntegrationTests(unittest.TestCase):
                     methods=(
                         JavaMember("Calculadora", "Calculadora", "public", (("valor", "int"),)),
                         JavaMember("somar", "int", "public", (("outro", "int"),)),
+                        JavaMember("ecoar", "String", "public", (("texto", "String"),)),
                     ),
                 ),
             ),

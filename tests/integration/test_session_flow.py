@@ -36,6 +36,39 @@ class FixedExtractor:
 
 
 class SessionFlowTests(unittest.TestCase):
+    def test_one_request_can_create_more_than_three_files(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            replies = [
+                json.dumps(
+                    {"tool": "write_file", "args": {"path": f"Classe{number}.java", "content": f"class Classe{number} {{}}\n"}}
+                )
+                for number in range(1, 5)
+            ] + ["Quatro classes criadas."]
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=ScriptedModel(replies),
+                pdf_extractor=FixedExtractor(UML),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                result = session.handle("Crie quatro classes")
+
+                self.assertIn("Quatro classes", result.text)
+                self.assertTrue(
+                    all(
+                        (project / f"Classe{number}.java").is_file()
+                        for number in range(1, 5)
+                    )
+                )
+            finally:
+                session.close()
+
     def test_pdf_choice_generation_compile_and_followup(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)

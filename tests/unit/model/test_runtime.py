@@ -35,7 +35,7 @@ class RuntimeTests(unittest.TestCase):
             calls.append(command)
             return process
 
-        config = RuntimeConfig(Path("llama-server"), Path("model.gguf"), context_size=2048, threads=2)
+        config = RuntimeConfig(Path("llama-server"), Path("model.gguf"), threads=2)
         runtime = LlamaRuntime(
             config,
             process_factory=process_factory,
@@ -47,7 +47,7 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(43123, runtime.port)
         self.assertEqual(
-            ["llama-server", "-m", "model.gguf", "--host", "127.0.0.1", "--port", "43123", "--ctx-size", "2048", "--threads", "2"],
+            ["llama-server", "-m", "model.gguf", "--host", "127.0.0.1", "--port", "43123", "--ctx-size", "4096", "--threads", "2"],
             calls[0],
         )
 

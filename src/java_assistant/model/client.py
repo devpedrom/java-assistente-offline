@@ -32,6 +32,7 @@ class LocalHttpTransport:
     def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
         body.setdefault("temperature", 0.1)
+        body.setdefault("max_tokens", 768)
         request = Request(
             self._url,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),

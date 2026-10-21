@@ -23,7 +23,7 @@ class RuntimeStartError(RuntimeError):
 class RuntimeConfig:
     executable: Path
     model: Path
-    context_size: int = 2048
+    context_size: int = 4096
     threads: int = 2
     ready_attempts: int = 60
     poll_interval: float = 0.25
