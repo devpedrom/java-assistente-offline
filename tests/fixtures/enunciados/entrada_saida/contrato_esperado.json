@@ -1,0 +1,39 @@
+{
+  "units": [
+    {
+      "name": "ConversorTemperatura",
+      "kind": "class",
+      "members": [
+        {
+          "name": "main",
+          "kind": "method",
+          "type_name": "void",
+          "visibility": "public",
+          "parameters": [
+            [
+              "args",
+              "String[]"
+            ]
+          ],
+          "modifiers": [
+            "static"
+          ]
+        },
+        {
+          "name": "converter",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [
+            [
+              "celsius",
+              "double"
+            ]
+          ],
+          "modifiers": []
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

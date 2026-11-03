@@ -1,0 +1,8 @@
+{
+  "entry": "Desenho",
+  "stdin": "",
+  "stdout_contains": [
+    "12.56",
+    "12.0"
+  ]
+}

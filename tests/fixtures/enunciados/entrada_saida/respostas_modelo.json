@@ -1,0 +1,20 @@
+{
+  "feliz": {
+    "ConversorTemperatura": [
+      "public class ConversorTemperatura {\n    public double converter(double celsius) {\n        return celsius * 9.0 / 5.0 + 32.0;\n    }\n\n    public static void main(String[] args) {\n        ConversorTemperatura conversor = new ConversorTemperatura();\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(conversor.converter(celsius));\n    }\n}\n"
+    ]
+  },
+  "reparo": {
+    "ConversorTemperatura": [
+      "public class ConversorTemperatura {\n    public double converter(double celsius) {\n        return celsius * 9.0 / 5.0 + 32.0\n    }\n\n    public static void main(String[] args) {\n        ConversorTemperatura conversor = new ConversorTemperatura();\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(conversor.converter(celsius));\n    }\n}\n",
+      "public class ConversorTemperatura {\n    public double converter(double celsius) {\n        return celsius * 9.0 / 5.0 + 32.0;\n    }\n\n    public static void main(String[] args) {\n        ConversorTemperatura conversor = new ConversorTemperatura();\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(conversor.converter(celsius));\n    }\n}\n"
+    ]
+  },
+  "negativo": {
+    "ConversorTemperatura": [
+      "public class ConversorTemperatura {\n    public static void main(String[] args) {\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(celsius * 9.0 / 5.0 + 32.0);\n    }\n}\n",
+      "public class ConversorTemperatura {\n    public static void main(String[] args) {\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(celsius * 9.0 / 5.0 + 32.0);\n    }\n}\n",
+      "public class ConversorTemperatura {\n    public static void main(String[] args) {\n        java.util.Scanner scanner = new java.util.Scanner(System.in);\n        if (!scanner.hasNextDouble()) {\n            return;\n        }\n        double celsius = scanner.nextDouble();\n        System.out.println(celsius * 9.0 / 5.0 + 32.0);\n    }\n}\n"
+    ]
+  }
+}

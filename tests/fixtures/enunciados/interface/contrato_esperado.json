@@ -1,0 +1,124 @@
+{
+  "units": [
+    {
+      "name": "Pagavel",
+      "kind": "interface",
+      "members": [
+        {
+          "name": "valor",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Boleto",
+      "kind": "class",
+      "members": [
+        {
+          "name": "codigo",
+          "kind": "field",
+          "type_name": "String",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "valorBase",
+          "kind": "field",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Boleto",
+          "kind": "constructor",
+          "type_name": "Boleto",
+          "visibility": "public",
+          "parameters": [
+            [
+              "codigo",
+              "String"
+            ],
+            [
+              "valorBase",
+              "double"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "valor",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Cartao",
+      "kind": "class",
+      "members": [
+        {
+          "name": "numero",
+          "kind": "field",
+          "type_name": "String",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "valorBase",
+          "kind": "field",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Cartao",
+          "kind": "constructor",
+          "type_name": "Cartao",
+          "visibility": "public",
+          "parameters": [
+            [
+              "numero",
+              "String"
+            ],
+            [
+              "valorBase",
+              "double"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "valor",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "parent": "Pagavel",
+      "child": "Boleto",
+      "kind": "implements"
+    },
+    {
+      "parent": "Pagavel",
+      "child": "Cartao",
+      "kind": "implements"
+    }
+  ]
+}

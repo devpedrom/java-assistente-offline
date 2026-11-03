@@ -1,0 +1,8 @@
+class Bonus
++ salario: double
++ Bonus(salario: double)
++ calcular(): double
++ main(String[] args): void
+
+O salario aumenta em 50% ao calcular o bonus.
+O valor calculado nunca pode ser maior que 10000.

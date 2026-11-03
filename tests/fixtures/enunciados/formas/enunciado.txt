@@ -1,0 +1,21 @@
+class Forma
++ area(): double
+
+class Circulo
++ raio: double
++ Circulo(raio: double)
++ area(): double
+
+class Retangulo
++ largura: double
++ altura: double
++ Retangulo(largura: double, altura: double)
++ area(): double
+
+class Desenho
++ main(String[] args): void
+
+Forma <|-- Circulo
+Forma <|-- Retangulo
+
+Cada subclasse sobrescreve area(). Desenho cria um Circulo de raio 2 e um Retangulo de 3 por 4 e mostra as areas.

@@ -1,0 +1,12 @@
+class Jogador
++ nome: String
++ Jogador(nome: String)
++ getNome(): String
+
+class Time
++ nome: String
++ capitao: Jogador
++ Time(nome: String, capitao: Jogador)
++ getCapitao(): Jogador
+
+Um Time tem um capitao Jogador.

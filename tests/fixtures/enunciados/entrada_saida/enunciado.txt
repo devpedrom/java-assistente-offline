@@ -1,0 +1,5 @@
+class ConversorTemperatura
++ main(String[] args): void
++ converter(celsius: double): double
+
+Leia a temperatura em Celsius com Scanner e mostre a equivalente em Fahrenheit.

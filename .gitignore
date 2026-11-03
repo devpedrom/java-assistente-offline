@@ -1,0 +1,33 @@
+__pycache__/
+.pytest_cache/
+.venv/
+build/
+dist/
+artifacts/
+work/
+.superpowers/
+*.pyc
+
+# Dados locais, exercícios externos e saídas de execução
+/exercicio_frota/
+.assistente/
+*.class
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Credenciais e configurações privadas
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Ferramentas locais e editores
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.egg-info/
+

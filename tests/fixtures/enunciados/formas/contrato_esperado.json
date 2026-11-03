@@ -1,0 +1,133 @@
+{
+  "units": [
+    {
+      "name": "Forma",
+      "kind": "class",
+      "members": [
+        {
+          "name": "area",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Circulo",
+      "kind": "class",
+      "members": [
+        {
+          "name": "raio",
+          "kind": "field",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Circulo",
+          "kind": "constructor",
+          "type_name": "Circulo",
+          "visibility": "public",
+          "parameters": [
+            [
+              "raio",
+              "double"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "area",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Retangulo",
+      "kind": "class",
+      "members": [
+        {
+          "name": "largura",
+          "kind": "field",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "altura",
+          "kind": "field",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Retangulo",
+          "kind": "constructor",
+          "type_name": "Retangulo",
+          "visibility": "public",
+          "parameters": [
+            [
+              "largura",
+              "double"
+            ],
+            [
+              "altura",
+              "double"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "area",
+          "kind": "method",
+          "type_name": "double",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Desenho",
+      "kind": "class",
+      "members": [
+        {
+          "name": "main",
+          "kind": "method",
+          "type_name": "void",
+          "visibility": "public",
+          "parameters": [
+            [
+              "args",
+              "String[]"
+            ]
+          ],
+          "modifiers": [
+            "static"
+          ]
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "parent": "Forma",
+      "child": "Circulo",
+      "kind": "inheritance"
+    },
+    {
+      "parent": "Forma",
+      "child": "Retangulo",
+      "kind": "inheritance"
+    }
+  ]
+}

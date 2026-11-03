@@ -1,0 +1,26 @@
+{
+  "feliz": {
+    "Pagavel": [
+      "public interface Pagavel {\n    public double valor();\n}\n"
+    ],
+    "Boleto": [
+      "public class Boleto implements Pagavel {\n    public String codigo;\n    public double valorBase;\n\n    public Boleto(String codigo, double valorBase) {\n        this.codigo = codigo;\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n"
+    ],
+    "Cartao": [
+      "public class Cartao implements Pagavel {\n    public String numero;\n    public double valorBase;\n\n    public Cartao(String numero, double valorBase) {\n        this.numero = numero;\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n"
+    ]
+  },
+  "reparo": {
+    "Boleto": [
+      "public class Boleto implements Pagavel {\n    public String codigo;\n    public double valorBase;\n\n    public Boleto(String codigo, double valorBase) {\n        this.codigo = codigo;\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase\n    }\n}\n",
+      "public class Boleto implements Pagavel {\n    public String codigo;\n    public double valorBase;\n\n    public Boleto(String codigo, double valorBase) {\n        this.codigo = codigo;\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n"
+    ]
+  },
+  "negativo": {
+    "Cartao": [
+      "public class Cartao implements Pagavel {\n    public double valorBase;\n\n    public Cartao(String numero, double valorBase) {\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n",
+      "public class Cartao implements Pagavel {\n    public double valorBase;\n\n    public Cartao(String numero, double valorBase) {\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n",
+      "public class Cartao implements Pagavel {\n    public double valorBase;\n\n    public Cartao(String numero, double valorBase) {\n        this.valorBase = valorBase;\n    }\n\n    public double valor() {\n        return valorBase;\n    }\n}\n"
+    ]
+  }
+}

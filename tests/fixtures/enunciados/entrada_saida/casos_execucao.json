@@ -1,0 +1,7 @@
+{
+  "entry": "ConversorTemperatura",
+  "stdin": "100\n",
+  "stdout_contains": [
+    "212"
+  ]
+}

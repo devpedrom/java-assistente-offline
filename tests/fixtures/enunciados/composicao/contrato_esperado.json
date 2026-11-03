@@ -1,0 +1,87 @@
+{
+  "units": [
+    {
+      "name": "Jogador",
+      "kind": "class",
+      "members": [
+        {
+          "name": "nome",
+          "kind": "field",
+          "type_name": "String",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Jogador",
+          "kind": "constructor",
+          "type_name": "Jogador",
+          "visibility": "public",
+          "parameters": [
+            [
+              "nome",
+              "String"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "getNome",
+          "kind": "method",
+          "type_name": "String",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    },
+    {
+      "name": "Time",
+      "kind": "class",
+      "members": [
+        {
+          "name": "nome",
+          "kind": "field",
+          "type_name": "String",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "capitao",
+          "kind": "field",
+          "type_name": "Jogador",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        },
+        {
+          "name": "Time",
+          "kind": "constructor",
+          "type_name": "Time",
+          "visibility": "public",
+          "parameters": [
+            [
+              "nome",
+              "String"
+            ],
+            [
+              "capitao",
+              "Jogador"
+            ]
+          ],
+          "modifiers": []
+        },
+        {
+          "name": "getCapitao",
+          "kind": "method",
+          "type_name": "Jogador",
+          "visibility": "public",
+          "parameters": [],
+          "modifiers": []
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

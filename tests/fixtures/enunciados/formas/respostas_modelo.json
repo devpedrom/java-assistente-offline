@@ -1,0 +1,29 @@
+{
+  "feliz": {
+    "Forma": [
+      "public class Forma {\n    public double area() {\n        return 0.0;\n    }\n}\n"
+    ],
+    "Circulo": [
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n\n    public double area() {\n        return Math.PI * raio * raio;\n    }\n}\n"
+    ],
+    "Retangulo": [
+      "public class Retangulo extends Forma {\n    public double largura;\n    public double altura;\n\n    public Retangulo(double largura, double altura) {\n        this.largura = largura;\n        this.altura = altura;\n    }\n\n    public double area() {\n        return largura * altura;\n    }\n}\n"
+    ],
+    "Desenho": [
+      "public class Desenho {\n    public static void main(String[] args) {\n        Forma circulo = new Circulo(2.0);\n        Forma retangulo = new Retangulo(3.0, 4.0);\n        System.out.println(circulo.area());\n        System.out.println(retangulo.area());\n    }\n}\n"
+    ]
+  },
+  "reparo": {
+    "Circulo": [
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n\n    public double area() {\n        return Math.PI * raio * raio\n    }\n}\n",
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n\n    public double area() {\n        return Math.PI * raio * raio;\n    }\n}\n"
+    ]
+  },
+  "negativo": {
+    "Circulo": [
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n}\n",
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n}\n",
+      "public class Circulo extends Forma {\n    public double raio;\n\n    public Circulo(double raio) {\n        this.raio = raio;\n    }\n}\n"
+    ]
+  }
+}

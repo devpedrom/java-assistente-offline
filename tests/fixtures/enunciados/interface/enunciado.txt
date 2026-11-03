@@ -1,0 +1,14 @@
+interface Pagavel
++ valor(): double
+
+class Boleto implements Pagavel
++ codigo: String
++ valorBase: double
++ Boleto(codigo: String, valorBase: double)
++ valor(): double
+
+class Cartao implements Pagavel
++ numero: String
++ valorBase: double
++ Cartao(numero: String, valorBase: double)
++ valor(): double

@@ -1,0 +1,23 @@
+{
+  "feliz": {
+    "Jogador": [
+      "public class Jogador {\n    public String nome;\n\n    public Jogador(String nome) {\n        this.nome = nome;\n    }\n\n    public String getNome() {\n        return nome;\n    }\n}\n"
+    ],
+    "Time": [
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n\n    public Jogador getCapitao() {\n        return capitao;\n    }\n}\n"
+    ]
+  },
+  "reparo": {
+    "Time": [
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n\n    public Jogador getCapitao() {\n        return capitao\n    }\n}\n",
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n\n    public Jogador getCapitao() {\n        return capitao;\n    }\n}\n"
+    ]
+  },
+  "negativo": {
+    "Time": [
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n}\n",
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n}\n",
+      "public class Time {\n    public String nome;\n    public Jogador capitao;\n\n    public Time(String nome, Jogador capitao) {\n        this.nome = nome;\n        this.capitao = capitao;\n    }\n}\n"
+    ]
+  }
+}

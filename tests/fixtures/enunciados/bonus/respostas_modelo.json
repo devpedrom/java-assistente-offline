@@ -1,0 +1,20 @@
+{
+  "feliz": {
+    "Bonus": [
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public double calcular() {\n        double valor = salario * 1.5;\n        if (valor > 10000.0) {\n            throw new IllegalArgumentException(\"Limite excedido\");\n        }\n        return valor;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.calcular());\n        try {\n            new Bonus(20000.0).calcular();\n            System.out.println(\"sem limite\");\n        } catch (IllegalArgumentException error) {\n            System.out.println(\"limite ok\");\n        }\n    }\n}\n"
+    ]
+  },
+  "reparo": {
+    "Bonus": [
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public double calcular() {\n        return salario;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.calcular());\n    }\n}\n",
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public double calcular() {\n        double valor = salario * 1.5;\n        if (valor > 10000.0) {\n            throw new IllegalArgumentException(\"Limite excedido\");\n        }\n        return valor;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.calcular());\n        try {\n            new Bonus(20000.0).calcular();\n            System.out.println(\"sem limite\");\n        } catch (IllegalArgumentException error) {\n            System.out.println(\"limite ok\");\n        }\n    }\n}\n"
+    ]
+  },
+  "negativo": {
+    "Bonus": [
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.salario);\n    }\n}\n",
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.salario);\n    }\n}\n",
+      "public class Bonus {\n    public double salario;\n\n    public Bonus(double salario) {\n        this.salario = salario;\n    }\n\n    public static void main(String[] args) {\n        Bonus bonus = new Bonus(1000.0);\n        System.out.println(bonus.salario);\n    }\n}\n"
+    ]
+  }
+}

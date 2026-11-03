@@ -1,0 +1,8 @@
+{
+  "entry": "Bonus",
+  "stdin": "",
+  "stdout_contains": [
+    "1500",
+    "limite ok"
+  ]
+}

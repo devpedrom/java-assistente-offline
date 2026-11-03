@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "language": {
+    "id": "java8",
+    "source_extension": ".java"
+  },
+  "toolchain": {
+    "compiler": "tools/native/bin/javac",
+    "runtime": "tools/native/bin/java",
+    "inspector": "tools/native/bin/javap"
+  },
+  "libraries": [],
+  "limits": {
+    "compile_timeout_s": 30,
+    "run_timeout_s": 15,
+    "inspect_timeout_s": 10,
+    "repair_attempts": 2,
+    "max_files": 40,
+    "context_tokens": 4096,
+    "output_tokens": 640
+  },
+  "context": {
+    "chars_per_token": 3.5,
+    "sections": {
+      "protocol": 220,
+      "criteria": 400,
+      "spec_target": 520,
+      "parents": 800,
+      "pdf_excerpt": 520,
+      "rules": 300,
+      "memory": 120,
+      "user_request": 180
+    }
+  },
+  "commands": {
+    "pdf": ["/pdf"],
+    "undo": ["/desfazer"],
+    "report": ["/relatorio"],
+    "profile": ["/perfil"],
+    "help": ["/ajuda"],
+    "exit": ["/sair", "sair"]
+  }
+}
