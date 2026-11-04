@@ -3,3 +3,5 @@ packaging/linux/java-assistente text eol=lf
 *.py text eol=lf
 *.md text eol=lf
 *.java text eol=lf
+*.pdf binary
+*.class binary
