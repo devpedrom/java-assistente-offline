@@ -32,7 +32,7 @@ class LocalHttpTransport:
     def __call__(self, payload: dict[str, Any]) -> dict[str, Any]:
         body = dict(payload)
         body.setdefault("temperature", 0.1)
-        body.setdefault("max_tokens", 768)
+        body.setdefault("max_tokens", 384)
         request = Request(
             self._url,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -40,7 +40,7 @@ class LocalHttpTransport:
             method="POST",
         )
         try:
-            with self._opener(request, timeout=120) as response:
+            with self._opener(request, timeout=600) as response:
                 decoded = json.loads(response.read().decode("utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise ModelProtocolError(f"Falha na comunicação com o modelo local: {error}") from error

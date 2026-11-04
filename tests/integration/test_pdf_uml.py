@@ -59,6 +59,51 @@ def tsv_for(text: str) -> str:
 
 
 class PdfUmlIntegrationTests(unittest.TestCase):
+    def test_portuguese_class_labels_and_herda_de_are_recognized(self) -> None:
+        evidence = PdfEvidence(
+            """CLASSE: Veiculo
+# passageiros: int
++ autonomia(): Double
++ Veiculo(int, int, Double)
+
+CLASSE: Motocicleta
+Herda de: Veiculo
+- cilindrada: int
++ autonomia(): Double
+
+HIERARQUIA DE HERANÇA
+LEGENDA UML
++ public (público)
+# protected (protegido)
+- private (privado)
+""",
+            "text",
+            (),
+        )
+
+        contract = UmlExtractor().extract(evidence)
+
+        self.assertEqual(
+            [item.name for item in contract.classes],
+            ["Veiculo", "Motocicleta"],
+        )
+        self.assertIn(
+            ("Veiculo", "Motocicleta", "inheritance"),
+            [
+                (item.parent, item.child, item.kind)
+                for item in contract.relationships
+            ],
+        )
+        constructor = contract.classes[0].methods[1]
+        self.assertEqual(
+            [type_name for _, type_name in constructor.parameters],
+            ["int", "int", "Double"],
+        )
+        self.assertEqual(
+            [method.name for method in contract.classes[1].methods],
+            ["autonomia"],
+        )
+
     def test_text_pdf_produces_classes_members_and_inheritance(self) -> None:
         with TemporaryDirectory() as temp:
             pdf = Path(temp) / "enunciado com acento á.pdf"

@@ -18,7 +18,7 @@ class ValidationReport:
 
 
 def _signature(owner: str, member: JavaMember) -> str:
-    parameters = ",".join(type_name for _, type_name in member.parameters)
+    parameters = ", ".join(type_name for _, type_name in member.parameters)
     if member.name == owner:
         return f"{member.visibility} {owner}({parameters});"
     return f"{member.visibility} {member.type_name} {member.name}({parameters});"
@@ -41,7 +41,11 @@ class ContractValidator:
             if inspected.returncode != 0:
                 issues.append(f"Classe ausente: {expected_class.name}")
                 continue
-            output = " ".join(inspected.stdout.split()).replace("java.lang.", "")
+            output = (
+                " ".join(inspected.stdout.split())
+                .replace("java.lang.", "")
+                .replace(" static ", " ")
+            )
             for field in expected_class.fields:
                 fragment = f"{field.visibility} {field.type_name} {field.name};"
                 if fragment not in output:

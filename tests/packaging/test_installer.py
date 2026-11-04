@@ -69,13 +69,22 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn(forbidden, script)
         self.assertIn("sha256sum -c", script)
         self.assertIn("JAVA_ASSISTANT_NO_START", script)
+        self.assertIn('ORIGINAL_DIR=$(pwd -P)', script)
+        self.assertIn('cd "$ORIGINAL_DIR"', script)
         builder = (ROOT / "packaging" / "linux" / "build-bundle.sh").read_text(
             encoding="utf-8"
         )
         self.assertNotIn('ARTIFACTS_DIR/python', builder)
         self.assertIn('ARTIFACTS_DIR/llama/llama-server', builder)
-        self.assertIn('ARTIFACTS_DIR/native/bin/pdftotext', builder)
-        self.assertIn('ARTIFACTS_DIR/native/bin/javac', builder)
+        self.assertIn('ARTIFACTS_DIR/native.tar.gz', builder)
+        self.assertIn('assemble_runtime.py', builder)
+        self.assertNotIn('mktemp -d', builder)
+        assembler = (
+            ROOT / "packaging" / "linux" / "assemble_runtime.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('bin/pdftotext', assembler)
+        self.assertIn('bin/javac', assembler)
+        self.assertIn('lib/libgomp.so.1', assembler)
         runtime_launcher = (
             ROOT / "packaging" / "linux" / "java-assistente"
         ).read_text(encoding="utf-8")

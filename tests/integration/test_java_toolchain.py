@@ -59,6 +59,35 @@ class JavaToolchainIntegrationTests(unittest.TestCase):
 
         self.assertTrue(report.valid, report.issues)
 
+    def test_validator_accepts_constructor_with_multiple_parameters(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "Veiculo.java").write_text(
+                "public class Veiculo { public Veiculo(int a, int b, Double c) {} }\n",
+                encoding="utf-8",
+            )
+            contract = JavaContract(
+                classes=(
+                    JavaClass(
+                        name="Veiculo",
+                        fields=(),
+                        methods=(
+                            JavaMember(
+                                "Veiculo",
+                                "Veiculo",
+                                "public",
+                                (("a", "int"), ("b", "int"), ("c", "Double")),
+                            ),
+                        ),
+                    ),
+                ),
+                relationships=(),
+            )
+
+            report = ContractValidator(JavaToolchain(root)).validate(contract, root)
+
+            self.assertTrue(report.valid, report.issues)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,9 +28,13 @@ class ModelClientTests(unittest.TestCase):
         self.assertEqual(request.full_url, "http://127.0.0.1:8081/v1/chat/completions")
         self.assertEqual(
             json.loads(request.data),
-            {"messages": [], "temperature": 0.1, "max_tokens": 768},
+            {
+                "messages": [],
+                "temperature": 0.1,
+                "max_tokens": 384,
+            },
         )
-        self.assertEqual(timeout, 120)
+        self.assertEqual(timeout, 600)
         self.assertEqual(result["choices"][0]["message"]["content"], "ok")
 
     def test_complete_returns_assistant_content(self) -> None:

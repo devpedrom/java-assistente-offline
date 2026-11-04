@@ -45,6 +45,7 @@ def build_context(
     *,
     criteria: str,
     contract: str,
+    source_text: str,
     memory_summary: str,
     relevant_files: dict[str, str],
     user_request: str,
@@ -57,6 +58,7 @@ def build_context(
         (
             "Você é um assistente offline especializado em Java POO. Nunca invente requisitos.",
             f"CRITÉRIOS GERAIS (texto integral):\n{criteria}",
+            f"TEXTO EXTRAÍDO DO PDF SELECIONADO:\n{source_text or '(ainda não carregado)'}",
             f"CONTRATO EXTRAÍDO DO ENUNCIADO/UML:\n{contract or '(ainda não carregado)'}",
             f"MEMÓRIA DESTE PROJETO/PDF:\n{memory_summary or '(vazia)'}",
             f"ARQUIVOS RELEVANTES:\n{files or '(nenhum)'}",

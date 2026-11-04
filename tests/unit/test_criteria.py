@@ -27,6 +27,7 @@ class CriteriaTests(unittest.TestCase):
         messages = build_context(
             criteria="REGRA COMPLETA\nNÃO OMITIR",
             contract="Classe Pessoa com nome:String",
+            source_text="A autonomia deve ser reduzida pela metade.",
             memory_summary="Getter deve retornar o campo",
             relevant_files={"Pessoa.java": "class Pessoa {}"},
             user_request="Corrija o getter",
@@ -35,6 +36,7 @@ class CriteriaTests(unittest.TestCase):
         joined = "\n".join(message.content for message in messages)
         self.assertIn("REGRA COMPLETA\nNÃO OMITIR", joined)
         self.assertIn("Classe Pessoa", joined)
+        self.assertIn("reduzida pela metade", joined)
         self.assertIn("Getter deve", joined)
         self.assertIn("Pessoa.java", joined)
         self.assertEqual(messages[-1].content, "Corrija o getter")

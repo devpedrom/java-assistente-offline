@@ -9,13 +9,22 @@ from java_assistant.pdf.extract import PdfEvidence
 from .models import JavaClass, JavaContract, JavaMember, Relationship
 
 
-_CLASS = re.compile(r"^\s*(?:class|classe)\s+([A-Za-z_À-ÿ][\wÀ-ÿ]*)\s*$", re.IGNORECASE)
+_CLASS = re.compile(
+    r"^\s*(?:class|classe)\s*:?\s*([A-Za-z_À-ÿ][\wÀ-ÿ]*)\s*$",
+    re.IGNORECASE,
+)
 _FIELD = re.compile(r"^\s*([+\-#~])\s*([\wÀ-ÿ]+)\s*:\s*([^()]+?)\s*$")
 _METHOD = re.compile(
     r"^\s*([+\-#~])\s*([\wÀ-ÿ]+)\s*\(([^)]*)\)\s*(?::\s*(.+?))?\s*$"
 )
 _INHERITANCE = re.compile(r"^\s*([\wÀ-ÿ]+)\s*<\|--\s*([\wÀ-ÿ]+)\s*$")
+_HERDA_DE = re.compile(r"^\s*herda\s+de\s*:\s*([\wÀ-ÿ]+)\s*$", re.IGNORECASE)
 _AMBIGUOUS = re.compile(r"^\s*([\wÀ-ÿ]+)\s*--\s*([\wÀ-ÿ]+)\s*$")
+_SECTION_END = re.compile(
+    r"^\s*(?:hierarquia\s+de\s+heran[çc]a|legenda\s+uml|"
+    r"descri[çc][ãa]o\s+dos\s+m[ée]todos|instru[çc][ãa]o\s+final)\s*$",
+    re.IGNORECASE,
+)
 _VISIBILITY = {"+": "public", "-": "private", "#": "protected", "~": "package"}
 
 
@@ -23,8 +32,11 @@ def _parameters(raw: str) -> tuple[tuple[str, str], ...]:
     if not raw.strip():
         return ()
     parsed: list[tuple[str, str]] = []
-    for part in raw.split(","):
+    for index, part in enumerate(raw.split(","), start=1):
         name_and_type = [value.strip() for value in part.split(":", 1)]
+        if len(name_and_type) == 1 and name_and_type[0]:
+            parsed.append((f"arg{index}", name_and_type[0]))
+            continue
         if len(name_and_type) != 2 or not all(name_and_type):
             continue
         parsed.append((name_and_type[0], name_and_type[1]))
@@ -49,10 +61,25 @@ class UmlExtractor:
 
         for raw_line in evidence.text.splitlines():
             line = raw_line.strip()
+            if _SECTION_END.match(line):
+                finish_class()
+                continue
             class_match = _CLASS.match(line)
             if class_match:
                 finish_class()
                 current_name = class_match.group(1)
+                continue
+
+            herda_de = _HERDA_DE.match(line)
+            if herda_de and current_name is not None:
+                relationships.append(
+                    Relationship(
+                        parent=herda_de.group(1),
+                        child=current_name,
+                        kind="inheritance",
+                        confidence=0.98,
+                    )
+                )
                 continue
 
             inheritance = _INHERITANCE.match(line)

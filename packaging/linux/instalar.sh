@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+ORIGINAL_DIR=$(pwd -P)
 SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 DATA_ROOT=${XDG_DATA_HOME:-"$HOME/.local/share"}
 CONFIG_ROOT=${XDG_CONFIG_HOME:-"$HOME/.config"}
@@ -53,6 +54,7 @@ exec "$APP_HOME/bin/java-assistente" "$@"
 LAUNCHER
 chmod +x "$USER_BIN/java-assistente"
 
+cd "$ORIGINAL_DIR"
 echo "Instalação concluída. Comando: $USER_BIN/java-assistente"
 if [ "${JAVA_ASSISTANT_NO_START:-0}" != "1" ]; then
     exec "$USER_BIN/java-assistente"

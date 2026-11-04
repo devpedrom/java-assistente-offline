@@ -27,6 +27,16 @@ class ScriptedModel:
         return ModelReply(reply)
 
 
+class RecordingScriptedModel(ScriptedModel):
+    def __init__(self, replies: list[str]) -> None:
+        super().__init__(replies)
+        self.message_history = []
+
+    def complete(self, messages):
+        self.message_history.append(list(messages))
+        return super().complete(messages)
+
+
 class FixedExtractor:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -35,7 +45,273 @@ class FixedExtractor:
         return PdfEvidence(self.text, "text", ())
 
 
+class CapturingModel:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def complete(self, messages):
+        self.messages = messages
+        return ModelReply("Enunciado analisado.")
+
+
 class SessionFlowTests(unittest.TestCase):
+    def test_next_model_call_keeps_the_actual_previous_action(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            write_block = '<write_file path="Auxiliar.java">\nclass Auxiliar {}\n</write_file>'
+            model = RecordingScriptedModel(
+                [
+                    write_block,
+                    "<compile_java />",
+                    "<respond>Pronto.</respond>",
+                ]
+            )
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(UML),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("Crie Auxiliar.java")
+
+                self.assertIn(write_block, [item.content for item in model.message_history[1]])
+            finally:
+                session.close()
+
+    def test_generation_prompt_focuses_on_one_exact_file(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "enunciado.pdf").touch()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            model = CapturingModel()
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(UML),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                session.handle("Resolva")
+
+                self.assertIn("SOMENTE Main.java", model.messages[-1].content)
+                self.assertTrue(
+                    any("public Main();" in item.content for item in model.messages)
+                )
+                self.assertTrue(
+                    any(
+                        "public void main(String[] args);" in item.content
+                        for item in model.messages
+                    )
+                )
+            finally:
+                session.close()
+
+    def test_detects_main_class_from_uml_method_even_with_custom_class_name(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "enunciado.pdf").touch()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=CapturingModel(),
+                pdf_extractor=FixedExtractor(
+                    "CLASSE: Aplicacao\n+ main(args: String[]): void\n"
+                ),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+
+                self.assertEqual("Aplicacao", session._main_class_name())
+            finally:
+                session.close()
+
+    def test_model_receives_method_rules_from_selected_pdf(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "frota.pdf").touch()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            model = CapturingModel()
+            pdf_text = """CLASSE: Pickup
++ autonomia(): Double
+Caso esteja totalmente carregada a autonomia e reduzida pela metade.
+"""
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(pdf_text),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                session.handle("Resolva o exercicio")
+
+                self.assertTrue(
+                    any("reduzida pela metade" in item.content for item in model.messages)
+                )
+                self.assertTrue(
+                    any("public Double autonomia();" in item.content for item in model.messages)
+                )
+                self.assertTrue(
+                    any("construtor vazio" in item.content for item in model.messages)
+                )
+            finally:
+                session.close()
+
+    def test_generation_prompt_expands_percentage_rules_into_exact_factors(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "hatch.pdf").touch()
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            model = CapturingModel()
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(
+                    "CLASSE: Hatch\n+ calculaVolume(int): Double\n"
+                    "O volume aumenta em 100% ou aumenta em 50%.\n"
+                ),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                session.handle("Resolva")
+
+                prompt = "\n".join(item.content for item in model.messages)
+                self.assertIn("base * 2.0", prompt)
+                self.assertIn("base * 1.5", prompt)
+            finally:
+                session.close()
+
+    def test_main_prompt_does_not_inherit_arithmetic_rules_from_other_classes(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "frota.pdf").touch()
+            (project / "Hatch.java").write_text(
+                "public class Hatch {}\n", encoding="utf-8"
+            )
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            model = CapturingModel()
+            pdf_text = """CLASSE: Hatch
++ calculaVolume(int): Double
+O volume aumenta em 100% ou aumenta em 50%.
+
+INSTRUÇÃO FINAL
+Crie uma classe Frota (main) que teste os métodos.
+"""
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(pdf_text),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                session.handle("Resolva")
+
+                prompt = "\n".join(item.content for item in model.messages)
+                self.assertIn("SOMENTE Frota.java", prompt)
+                self.assertNotIn("base * 2.0", prompt)
+                self.assertNotIn("base * 1.5", prompt)
+            finally:
+                session.close()
+
+    def test_guided_generation_repairs_compiling_code_that_diverges_from_uml(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "enunciado.pdf").touch()
+            template = root / "criterios.md"
+            template.write_text("Preserve exatamente os tipos do UML.\n", encoding="utf-8")
+            model = ScriptedModel(
+                [
+                    "public class Conta { public double total() { return 0.0; } }",
+                    "public class Conta { public Double total() { return 0.0; } }",
+                ]
+            )
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor("class Conta\n+ total(): Double\n"),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                solved = session.handle("Resolva")
+
+                self.assertIn("compilação Java 8 aprovada", solved.text)
+                self.assertEqual(model.calls, 2)
+                self.assertIn("Double total()", (project / "Conta.java").read_text(encoding="utf-8"))
+            finally:
+                session.close()
+
+    def test_solve_reenters_guided_pipeline_when_all_sources_already_exist(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            (project / "enunciado.pdf").touch()
+            (project / "Main.java").write_text(
+                "public class Main { public static void main(String[] args) { missing(); } }\n",
+                encoding="utf-8",
+            )
+            template = root / "criterios.md"
+            template.write_text("Java POO.\n", encoding="utf-8")
+            model = ScriptedModel(
+                ["public class Main { public static void main(String[] args) {} }"]
+            )
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model,
+                pdf_extractor=FixedExtractor(UML),
+                toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/pdf")
+                session.handle("1")
+                solved = session.handle("Resolva")
+
+                self.assertIn("compilação Java 8 aprovada", solved.text)
+                self.assertEqual(1, model.calls)
+            finally:
+                session.close()
+
     def test_one_request_can_create_more_than_three_files(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)
@@ -48,7 +324,7 @@ class SessionFlowTests(unittest.TestCase):
                     {"tool": "write_file", "args": {"path": f"Classe{number}.java", "content": f"class Classe{number} {{}}\n"}}
                 )
                 for number in range(1, 5)
-            ] + ["Quatro classes criadas."]
+            ] + [json.dumps({"tool": "respond", "args": {"text": "Quatro classes criadas."}})]
             session = AssistantSession(
                 config=AppConfig(project, root / "data", root / "config", root / "state"),
                 model=ScriptedModel(replies),
@@ -81,10 +357,8 @@ class SessionFlowTests(unittest.TestCase):
             source = "public class Main { public static void main(String[] args) {} }\n"
             model = ScriptedModel(
                 [
-                    json.dumps({"tool": "write_file", "args": {"path": "Main.java", "content": source}}),
-                    json.dumps({"tool": "compile_java", "args": {"sources": ["Main.java"]}}),
-                    "Solução criada e compilada localmente.",
-                    "Microajuste analisado sem perder o contexto.",
+                    source,
+                    json.dumps({"tool": "respond", "args": {"text": "Microajuste analisado sem perder o contexto."}}),
                 ]
             )
             session = AssistantSession(
@@ -103,7 +377,7 @@ class SessionFlowTests(unittest.TestCase):
             self.assertIn("1. Enunciado á.pdf", listing.text)
             self.assertIn("Main", selected.text)
             self.assertTrue((project / "Main.java").is_file())
-            self.assertIn("compilada", solved.text)
+            self.assertIn("compilação Java 8 aprovada", solved.text)
             self.assertIn("Microajuste", followup.text)
             report = session.evidence.render()
             self.assertIn("## Compilado", report)

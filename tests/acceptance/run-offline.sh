@@ -15,15 +15,22 @@ export HOME="$WORK/home"
 export XDG_DATA_HOME="$WORK/data"
 export XDG_CONFIG_HOME="$WORK/config"
 export XDG_STATE_HOME="$WORK/state"
-export JAVA_ASSISTANT_NO_START=1
 mkdir -p "$HOME" "$WORK/Projeto com acento á" "$WORK/origem"
 cp -a "$BUNDLE/." "$WORK/origem/"
 
 START=$(date +%s)
-"$WORK/origem/instalar.sh"
+cd "$WORK/Projeto com acento á"
+FIRST_OUTPUT=$(printf '/sair\n' | timeout 300 "$WORK/origem/instalar.sh")
+printf '%s\n' "$FIRST_OUTPUT"
+case "$FIRST_OUTPUT" in
+    *"projeto: $WORK/Projeto com acento á"*) ;;
+    *)
+        echo "FALHA: instalador não abriu na pasta atual da solução." >&2
+        exit 1
+        ;;
+esac
 mv "$WORK/origem" "$WORK/origem-removida"
 
-cd "$WORK/Projeto com acento á"
 printf '/sair\n' | timeout 300 "$HOME/.local/bin/java-assistente"
 END=$(date +%s)
 

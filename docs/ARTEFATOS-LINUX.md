@@ -8,26 +8,20 @@ artifacts/linux-x86_64/
   llama/
     llama-server
     libggml*.so e demais bibliotecas do mesmo release
-  native/
-    bin/java
-    bin/javac
-    bin/javap
-    bin/pdftotext
-    bin/pdftoppm
-    bin/tesseract
-    lib/...
-    share/tessdata/eng.traineddata
-    share/tessdata/por.traineddata
+  native.tar.gz
+    # arquivo compactado cuja raiz contém bin/, lib/ e share/
+    # preserva os links simbólicos dos binários Linux
 ```
 
 ## Modelo fixado
 
-- Repositório oficial: `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF`
-- Arquivo: `qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`
+- Repositório oficial: `Qwen/Qwen2.5-Coder-3B-Instruct-GGUF`
+- Arquivo: `qwen2.5-coder-3b-instruct-q3_k_m.gguf`
 - Nome dentro do projeto: `model.gguf`
-- Tamanho publicado: aproximadamente 1,12 GB.
-- Baixado e verificado neste projeto: 1.117.320.768 bytes, assinatura `GGUF`.
-- SHA-256 verificado contra o `X-Linked-ETag` oficial: `cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046`.
+- Tamanho publicado: aproximadamente 1,72 GB.
+- Baixado e verificado neste projeto: 1.724.178.880 bytes, assinatura `GGUF`.
+- SHA-256 verificado contra o arquivo oficial: `fc3937db7dda9d9ef68ce1f63b5a84ac850ec3c07578461d645e5a88509348e3`.
+- Motivo da troca: o modelo 1.5B não foi consistente no exercício de aceitação; o 3B Q3_K_M passou na geração guiada e ainda mantém o bundle abaixo do limite rígido de 2 GB.
 
 ## llama.cpp fixado
 
@@ -39,7 +33,8 @@ artifacts/linux-x86_64/
 ## Regras para os binários
 
 - Use o release CPU Ubuntu x64 do `ggml-org/llama.cpp`, mantendo `llama-server` e suas bibliotecas `.so` juntos em `llama/`.
-- O diretório unificado `native/` deve conter OpenJDK 17 (incluindo `javac` e `javap`), Poppler e Tesseract para Linux x86-64, com as bibliotecas dinâmicas em `native/lib`.
+- O arquivo unificado `native.tar.gz` deve conter OpenJDK 17 (incluindo `javac` e `javap`), Poppler e Tesseract para Linux x86-64, com as bibliotecas dinâmicas em `lib`.
+- O arquivo deve conter `lib/libgomp.so.1`, exigido pelo `llama-server`, e `share/tessdata/eng.traineddata`, `por.traineddata` e `osd.traineddata`.
 - Não misture binários Windows no diretório Linux.
 - Registre SHA-256 e versões em `tests/acceptance/checklist.md`.
 
@@ -47,4 +42,4 @@ O build recusa artefatos ausentes e bundles acima de 2 GB. A aprovação final e
 
 ## Estado desta máquina
 
-`model.gguf` e `llama/` estão prontos em `artifacts/linux-x86_64`. O diretório `native/` continua pendente: a tentativa cruzada com pacotes Linux falhou porque o Windows atual bloqueia os links simbólicos exigidos. Gere `native/` em Linux/WSL ou habilite um ambiente que preserve symlinks antes de chamar o bundle final de pronto.
+`model.gguf`, `llama/` e `native.tar.gz` estão prontos em `artifacts/linux-x86_64`. A execução ponta a ponta foi validada no Ubuntu 24.04 via WSL; ainda é recomendável repetir a aceitação no Linux Mint e no hardware real da competição.

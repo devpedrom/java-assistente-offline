@@ -25,7 +25,7 @@ O ZIP do exercicio Frota foi apenas uma amostra de formato. Nenhuma classe, regr
 
 ### 3.1 Inferencia local
 
-Usar `llama.cpp` com o modelo `Qwen2.5-Coder-1.5B-Instruct` no formato GGUF e quantizacao `Q4_K_M`. O modelo deve ficar no pacote offline e ser substituivel por configuracao, sem alterar o restante da aplicacao.
+Usar `llama.cpp` com o modelo `Qwen2.5-Coder-3B-Instruct` no formato GGUF e quantizacao `Q3_K_M`. O modelo deve ficar no pacote offline e ser substituivel por configuracao, sem alterar o restante da aplicacao. O 3B substitui o 1.5B após o exercício de aceitação demonstrar inconsistência do modelo menor; o bundle continua sujeito ao limite rígido de 2 GB.
 
 A configuracao padrao deve priorizar 4 GB de RAM:
 

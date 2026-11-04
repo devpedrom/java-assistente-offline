@@ -25,7 +25,7 @@ class RuntimeConfig:
     model: Path
     context_size: int = 4096
     threads: int = 2
-    ready_attempts: int = 60
+    ready_attempts: int = 240
     poll_interval: float = 0.25
 
 
@@ -79,6 +79,8 @@ class LlamaRuntime:
             str(self._config.context_size),
             "--threads",
             str(self._config.threads),
+            "--parallel",
+            "1",
         ]
         self._process = self._process_factory(command)
         for _ in range(self._config.ready_attempts):

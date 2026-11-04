@@ -36,6 +36,11 @@ class RuntimeTests(unittest.TestCase):
             return process
 
         config = RuntimeConfig(Path("llama-server"), Path("model.gguf"), threads=2)
+        self.assertGreaterEqual(
+            config.ready_attempts * config.poll_interval,
+            45,
+            "um modelo maior precisa de pelo menos 45 s para iniciar em CPU fraca",
+        )
         runtime = LlamaRuntime(
             config,
             process_factory=process_factory,
@@ -47,7 +52,7 @@ class RuntimeTests(unittest.TestCase):
 
         self.assertEqual(43123, runtime.port)
         self.assertEqual(
-            ["llama-server", "-m", "model.gguf", "--host", "127.0.0.1", "--port", "43123", "--ctx-size", "4096", "--threads", "2"],
+            ["llama-server", "-m", "model.gguf", "--host", "127.0.0.1", "--port", "43123", "--ctx-size", "4096", "--threads", "2", "--parallel", "1"],
             calls[0],
         )
 

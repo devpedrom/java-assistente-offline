@@ -13,9 +13,12 @@ class CountingModel:
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, _messages):
+    def complete(self, messages):
         self.calls += 1
-        return ModelReply("Agora posso continuar.")
+        requested = messages[-1].content
+        if "Pedido.java" in requested:
+            return ModelReply("public class Pedido {}")
+        return ModelReply("public class Item {}")
 
 
 class AmbiguousExtractor:
@@ -42,21 +45,23 @@ class AmbiguousUmlTests(unittest.TestCase):
                 criteria_template=template,
             )
 
-            session.handle("/pdf")
-            question = session.handle("1")
-            blocked = session.handle("Resolva")
+            try:
+                session.handle("/pdf")
+                question = session.handle("1")
+                blocked = session.handle("Resolva")
 
-            self.assertIn("ambígu", question.text.casefold())
-            self.assertIn("escolha", blocked.text.casefold())
-            self.assertEqual(model.calls, 0)
+                self.assertIn("ambígu", question.text.casefold())
+                self.assertIn("escolha", blocked.text.casefold())
+                self.assertEqual(model.calls, 0)
 
-            resolved = session.handle("1")
-            continued = session.handle("Resolva")
+                resolved = session.handle("1")
+                continued = session.handle("Resolva")
 
-            self.assertIn("association", resolved.text)
-            self.assertIn("continuar", continued.text)
-            self.assertEqual(model.calls, 1)
-            session.close()
+                self.assertIn("association", resolved.text)
+                self.assertIn("Solução concluída", continued.text)
+                self.assertEqual(model.calls, 2)
+            finally:
+                session.close()
 
 
 if __name__ == "__main__":
