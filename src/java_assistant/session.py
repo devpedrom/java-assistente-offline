@@ -26,7 +26,7 @@ from .workspace.history import History
 
 
 class ModelLike(Protocol):
-    def complete(self, messages: list[Message]) -> ModelReply: ...
+    def complete(self, messages: list[Message], *, max_tokens: int | None = None) -> ModelReply: ...
 
 
 def _fold_text(text: str) -> str:
@@ -448,7 +448,21 @@ class AssistantSession:
         requirements = self._focused_requirements(class_name)
         last_error = ""
         for _attempt in range(2):
-            reply = self.model.complete(messages)
+            reply = self.model.complete(messages, max_tokens=1200)
+            if reply.truncated:
+                last_error = (
+                    f"a resposta do modelo foi cortada antes do fim de {class_name}.java. "
+                    "Peça a classe novamente, com menos métodos por arquivo."
+                )
+                messages.append(Message("assistant", reply.content[:500]))
+                messages.append(
+                    Message(
+                        "user",
+                        f"A resposta anterior foi cortada. Retorne SOMENTE {class_name}.java "
+                        "completo, sem comentários e sem código de outras classes.",
+                    )
+                )
+                continue
             try:
                 source = _extract_java_source(reply.content, class_name)
             except ValueError as error:

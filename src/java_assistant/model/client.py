@@ -18,6 +18,7 @@ class Message:
 @dataclass(frozen=True, slots=True)
 class ModelReply:
     content: str
+    truncated: bool = False
 
 
 class LocalHttpTransport:
@@ -53,19 +54,25 @@ class ModelClient:
     def __init__(self, transport: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
         self._transport = transport
 
-    def complete(self, messages: list[Message]) -> ModelReply:
+    def complete(
+        self, messages: list[Message], *, max_tokens: int | None = None
+    ) -> ModelReply:
         payload = {
             "messages": [
                 {"role": message.role, "content": message.content}
                 for message in messages
             ]
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         response = self._transport(payload)
         try:
-            content = response["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as error:
+            choice = response["choices"][0]
+            content = choice["message"]["content"]
+            truncated = choice.get("finish_reason") == "length"
+        except (KeyError, IndexError, TypeError, AttributeError) as error:
             raise ModelProtocolError("Resposta incompleta do modelo local.") from error
         if not isinstance(content, str):
             raise ModelProtocolError("O conteudo retornado pelo modelo nao e texto.")
-        return ModelReply(content=content)
+        return ModelReply(content=content, truncated=truncated)
 

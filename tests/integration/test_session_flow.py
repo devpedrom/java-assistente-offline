@@ -21,7 +21,7 @@ class ScriptedModel:
         self.replies = replies
         self.calls = 0
 
-    def complete(self, messages):
+    def complete(self, messages, **_kwargs):
         reply = self.replies[self.calls]
         self.calls += 1
         return ModelReply(reply)
@@ -32,7 +32,7 @@ class RecordingScriptedModel(ScriptedModel):
         super().__init__(replies)
         self.message_history = []
 
-    def complete(self, messages):
+    def complete(self, messages, **_kwargs):
         self.message_history.append(list(messages))
         return super().complete(messages)
 
@@ -49,7 +49,7 @@ class CapturingModel:
     def __init__(self) -> None:
         self.messages = []
 
-    def complete(self, messages):
+    def complete(self, messages, **_kwargs):
         self.messages = messages
         return ModelReply("Enunciado analisado.")
 
@@ -475,7 +475,7 @@ class FailureBoundaryTests(unittest.TestCase):
 
     def test_model_failure_keeps_chat_alive(self) -> None:
         class BrokenModel:
-            def complete(self, _messages):
+            def complete(self, _messages, **_kwargs):
                 raise RuntimeError("modelo local parou")
 
         with TemporaryDirectory() as temp:
@@ -485,6 +485,24 @@ class FailureBoundaryTests(unittest.TestCase):
 
                 self.assertIn("modelo local parou", reply.text)
                 self.assertFalse(reply.exit_requested)
+            finally:
+                session.close()
+
+    def test_truncated_reply_asks_instead_of_blaming_the_code(self) -> None:
+        class TruncatedModel:
+            def complete(self, _messages, **_kwargs):
+                return ModelReply("class Conta {", truncated=True)
+
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp), FixedExtractor(""), TruncatedModel())
+            try:
+                session.handle("/enunciado")
+                session.handle("CLASSE: Conta\n- saldo: double")
+                session.handle("/fim")
+                reply = session.handle("Resolva")
+
+                self.assertIn("cortada", reply.text)
+                self.assertNotIn("compilação", reply.text.casefold())
             finally:
                 session.close()
 

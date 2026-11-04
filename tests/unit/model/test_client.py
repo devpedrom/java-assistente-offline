@@ -59,6 +59,41 @@ class ModelClientTests(unittest.TestCase):
         with self.assertRaises(ModelProtocolError):
             client.complete([Message("user", "Oi")])
 
+    def test_transport_accepts_per_call_max_tokens(self) -> None:
+        captured: list[dict] = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data))
+            return Response()
+
+        LocalHttpTransport(1234, opener=opener)({"messages": [], "max_tokens": 1024})
+
+        self.assertEqual(captured[0]["max_tokens"], 1024)
+
+    def test_length_finish_reason_marks_reply_truncated(self) -> None:
+        client = ModelClient(
+            lambda _payload: {
+                "choices": [
+                    {"message": {"content": "class Conta {"}, "finish_reason": "length"}
+                ]
+            }
+        )
+
+        reply = client.complete([Message("user", "x")])
+
+        self.assertTrue(reply.truncated)
+        self.assertEqual("class Conta {", reply.content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ class CountingModel:
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, messages):
+    def complete(self, messages, **_kwargs):
         self.calls += 1
         requested = messages[-1].content
         if "Pedido.java" in requested:
