@@ -1,0 +1,7 @@
+Conta
+- saldo: double
++ getSaldo(): double
+
+ContaPoupanca
+- taxa: double
+herda de: Conta

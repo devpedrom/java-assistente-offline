@@ -1,0 +1,14 @@
+CLASSE: Conta
+- saldo: double
+- limite: double
++ Conta(saldo: double, limite: double)
++ getSaldo(): double
++ sacar(valor: double): boolean
+
+CLASSE: ContaPoupanca
+- taxa: double
++ ContaPoupanca(saldo: double, limite: double, taxa: double)
++ render(): void
+herda de: Conta
+
+Regra: a cada mes o saldo aumenta em 2%.

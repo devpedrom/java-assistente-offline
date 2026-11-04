@@ -1,0 +1,45 @@
+{
+  "contract_scope": "full",
+  "classes": [
+    {
+      "name": "Aluno",
+      "fields": [
+        {"name": "nome", "type_name": "String", "visibility": "private"},
+        {"name": "matricula", "type_name": "int", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "Aluno", "type_name": "Aluno", "visibility": "public",
+         "parameters": [{"name": "nome", "type_name": "String"},
+                        {"name": "matricula", "type_name": "int"}]},
+        {"name": "getNome", "type_name": "String", "visibility": "public", "parameters": []}
+      ]
+    },
+    {
+      "name": "Turma",
+      "fields": [
+        {"name": "codigo", "type_name": "String", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "Turma", "type_name": "Turma", "visibility": "public",
+         "parameters": [{"name": "codigo", "type_name": "String"}]},
+        {"name": "matricular", "type_name": "boolean", "visibility": "public",
+         "parameters": [{"name": "aluno", "type_name": "Aluno"}]}
+      ]
+    },
+    {
+      "name": "Curso",
+      "fields": [
+        {"name": "nome", "type_name": "String", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "Curso", "type_name": "Curso", "visibility": "public",
+         "parameters": [{"name": "nome", "type_name": "String"}]},
+        {"name": "adicionarTurma", "type_name": "void", "visibility": "public",
+         "parameters": [{"name": "turma", "type_name": "Turma"}]}
+      ]
+    }
+  ],
+  "relationships": [
+    {"parent": "Aluno", "child": "Turma", "kind": "ambiguous"}
+  ]
+}

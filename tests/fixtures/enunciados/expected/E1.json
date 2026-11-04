@@ -1,0 +1,36 @@
+{
+  "contract_scope": "full",
+  "classes": [
+    {
+      "name": "Conta",
+      "fields": [
+        {"name": "saldo", "type_name": "double", "visibility": "private"},
+        {"name": "limite", "type_name": "double", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "Conta", "type_name": "Conta", "visibility": "public",
+         "parameters": [{"name": "saldo", "type_name": "double"},
+                        {"name": "limite", "type_name": "double"}]},
+        {"name": "getSaldo", "type_name": "double", "visibility": "public", "parameters": []},
+        {"name": "sacar", "type_name": "boolean", "visibility": "public",
+         "parameters": [{"name": "valor", "type_name": "double"}]}
+      ]
+    },
+    {
+      "name": "ContaPoupanca",
+      "fields": [
+        {"name": "taxa", "type_name": "double", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "ContaPoupanca", "type_name": "ContaPoupanca", "visibility": "public",
+         "parameters": [{"name": "saldo", "type_name": "double"},
+                        {"name": "limite", "type_name": "double"},
+                        {"name": "taxa", "type_name": "double"}]},
+        {"name": "render", "type_name": "void", "visibility": "public", "parameters": []}
+      ]
+    }
+  ],
+  "relationships": [
+    {"parent": "Conta", "child": "ContaPoupanca", "kind": "inheritance"}
+  ]
+}

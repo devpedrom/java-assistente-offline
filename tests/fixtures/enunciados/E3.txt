@@ -1,0 +1,19 @@
+CLASSE: Aluno
+- nome: String
+- matricula: int
++ Aluno(nome: String, matricula: int)
++ getNome(): String
+
+CLASSE: Turma
+- codigo: String
++ Turma(codigo: String)
++ matricular(aluno: Aluno): boolean
+
+CLASSE: Curso
+- nome: String
++ Curso(nome: String)
++ adicionarTurma(turma: Turma): void
+
+Aluno -- Turma
+
+Regra: o numero de alunos nunca pode ser maior que a capacidade da turma.

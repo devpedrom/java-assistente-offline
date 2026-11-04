@@ -1,0 +1,24 @@
+{
+  "contract_scope": "full",
+  "classes": [
+    {
+      "name": "Conta",
+      "fields": [
+        {"name": "saldo", "type_name": "double", "visibility": "private"}
+      ],
+      "methods": [
+        {"name": "getSaldo", "type_name": "double", "visibility": "public", "parameters": []}
+      ]
+    },
+    {
+      "name": "ContaPoupanca",
+      "fields": [
+        {"name": "taxa", "type_name": "double", "visibility": "private"}
+      ],
+      "methods": []
+    }
+  ],
+  "relationships": [
+    {"parent": "Conta", "child": "ContaPoupanca", "kind": "inheritance"}
+  ]
+}
