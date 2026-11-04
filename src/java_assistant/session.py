@@ -837,6 +837,12 @@ class AssistantSession:
             messages.append(Message("user", f"RESULTADO DA AÇÃO:\n{result}"))
 
     def handle(self, text: str) -> SessionReply:
+        try:
+            return self._dispatch(text)
+        except (OSError, ValueError, RuntimeError) as error:
+            return SessionReply(f"Não consegui concluir: {error}")
+
+    def _dispatch(self, text: str) -> SessionReply:
         stripped = text.strip()
         if not stripped:
             return SessionReply("")

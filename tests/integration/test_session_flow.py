@@ -6,7 +6,7 @@ import unittest
 from java_assistant.config import AppConfig
 from java_assistant.java.toolchain import JavaToolchain
 from java_assistant.model.client import ModelReply
-from java_assistant.pdf.extract import PdfEvidence
+from java_assistant.pdf.extract import PdfEvidence, PdfExtractionError
 from java_assistant.session import AssistantSession
 
 
@@ -435,6 +435,56 @@ class PastedEnunciadoTests(unittest.TestCase):
                 reply = session.handle("/sair")
 
                 self.assertTrue(reply.exit_requested)
+            finally:
+                session.close()
+
+
+class FailingExtractor:
+    def extract(self, _path: Path) -> PdfEvidence:
+        raise PdfExtractionError("PDF ilegível")
+
+
+class FailureBoundaryTests(unittest.TestCase):
+    def _session(self, root: Path, extractor, model) -> AssistantSession:
+        project = root / "projeto"
+        project.mkdir()
+        (project / "enunciado.pdf").touch()
+        template = root / "criterios.md"
+        template.write_text("Java POO.\n", encoding="utf-8")
+        return AssistantSession(
+            config=AppConfig(project, root / "data", root / "config", root / "state"),
+            model=model,
+            pdf_extractor=extractor,
+            toolchain=JavaToolchain(project),
+            criteria_template=template,
+        )
+
+    def test_unreadable_pdf_keeps_chat_alive(self) -> None:
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp), FailingExtractor(), ScriptedModel([]))
+            try:
+                self.assertIn("enunciado.pdf", session.handle("/pdf").text)
+                reply = session.handle("1")
+
+                self.assertIn("Não consegui concluir", reply.text)
+                self.assertIn("PDF ilegível", reply.text)
+                self.assertFalse(reply.exit_requested)
+                self.assertIn("enunciado.pdf", session.handle("/pdf").text)
+            finally:
+                session.close()
+
+    def test_model_failure_keeps_chat_alive(self) -> None:
+        class BrokenModel:
+            def complete(self, _messages):
+                raise RuntimeError("modelo local parou")
+
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp), FixedExtractor(""), BrokenModel())
+            try:
+                reply = session.handle("Resolva o exercício")
+
+                self.assertIn("modelo local parou", reply.text)
+                self.assertFalse(reply.exit_requested)
             finally:
                 session.close()
 

@@ -79,13 +79,15 @@ def main() -> int:
             ),
             criteria_template=app_home / "share" / "CRITERIOS_GERAIS.md",
         )
-        return run_cli(config, session=session)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Não foi possível iniciar o assistente: {error}")
+        runtime.stop()
         return 2
+
+    try:
+        return run_cli(config, session=session)
     finally:
-        if session is not None:
-            session.close()
+        session.close()
         runtime.stop()
 
 
