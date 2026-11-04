@@ -13,11 +13,11 @@ from .config import AppConfig
 from .criteria import build_context, ensure_criteria, load_criteria
 from .java.toolchain import JavaToolchain
 from .java.validator import ContractValidator
-from .memory.store import ProjectStore, pdf_sha256, project_identifier
+from .memory.store import ProjectStore, pdf_sha256, project_identifier, text_sha256
 from .model.actions import Action, ActionValidationError, parse_action
 from .model.client import Message, ModelReply
 from .pdf.discovery import discover_pdfs
-from .pdf.extract import PdfExtractor
+from .pdf.extract import PdfEvidence, PdfExtractor
 from .review.report import EvidenceReport
 from .uml.extract import UmlExtractor
 from .uml.models import JavaContract, Relationship
@@ -185,6 +185,8 @@ class AssistantSession:
         self._criteria_path = ensure_criteria(config, criteria_template)
         self._pdf_choices: list[Path] = []
         self._awaiting_pdf_choice = False
+        self._awaiting_enunciado = False
+        self._enunciado_lines: list[str] = []
         self._contract: JavaContract | None = None
         self._pdf_text = ""
         self._ambiguities: list[int] = []
@@ -593,14 +595,36 @@ class AssistantSession:
         self._awaiting_pdf_choice = False
         selected = self._pdf_choices[number - 1]
         evidence = self.pdf_extractor.extract(selected)
+        return self._apply_evidence(evidence, pdf_sha256(selected), selected.name)
+
+    def _finish_enunciado(self) -> SessionReply:
+        raw = "\n".join(self._enunciado_lines)
+        self._awaiting_enunciado = False
+        self._enunciado_lines = []
+        if not raw.strip():
+            return SessionReply("Nenhum texto recebido. Use /enunciado novamente.")
+        evidence = PdfEvidence(text=raw, source="texto colado", warnings=())
+        return self._apply_evidence(evidence, text_sha256(raw), "texto colado")
+
+    def _apply_evidence(
+        self, evidence: PdfEvidence, identity: str, label: str
+    ) -> SessionReply:
+        contract = UmlExtractor().extract(evidence)
+        if not contract.classes:
+            self._contract = None
+            self._pdf_text = ""
+            return SessionReply(
+                "Não reconheci nenhuma classe no enunciado. Envie o diagrama com as classes, "
+                "os atributos e os métodos, ou corrija o texto e use /enunciado novamente."
+            )
+        self._contract = contract
         self._pdf_text = evidence.text[:12_000]
-        self._contract = UmlExtractor().extract(evidence)
         self._store.close()
         self._store = ProjectStore.open(
-            pdf_sha256(selected), project_identifier(self.config.project_root), self.config.state_dir
+            identity, project_identifier(self.config.project_root), self.config.state_dir
         )
-        self._store.remember("pdf", f"Selecionado: {selected.name}; fonte: {evidence.source}")
-        self.evidence.confirmed_pdf.append(f"Arquivo selecionado: {selected.name}")
+        self._store.remember("pdf", f"Selecionado: {label}; fonte: {evidence.source}")
+        self.evidence.confirmed_pdf.append(f"Enunciado: {label}")
         self.evidence.confirmed_pdf.append(f"Extração utilizada: {evidence.source}")
         for java_class in self._contract.classes:
             self.evidence.inferred_uml.append(f"Classe {java_class.name}")
@@ -609,12 +633,13 @@ class AssistantSession:
             for index, relationship in enumerate(self._contract.relationships)
             if relationship.confidence < 0.9 and relationship.alternatives
         ]
-        summary = ", ".join(item.name for item in self._contract.classes) or "nenhuma classe segura"
+        summary = ", ".join(item.name for item in self._contract.classes)
         if self._ambiguities:
             return SessionReply(
-                f"PDF carregado. Classes reconhecidas: {summary}.\n" + self._ambiguity_question()
+                f"Enunciado carregado. Classes reconhecidas: {summary}.\n"
+                + self._ambiguity_question()
             )
-        return SessionReply(f"PDF carregado. Classes reconhecidas: {summary}.")
+        return SessionReply(f"Enunciado carregado. Classes reconhecidas: {summary}.")
 
     def _ambiguity_question(self) -> str:
         assert self._contract is not None and self._ambiguities
@@ -818,6 +843,15 @@ class AssistantSession:
         lowered = stripped.casefold()
         if lowered in {"/sair", "sair"}:
             return SessionReply("Até logo.", True)
+        if self._awaiting_enunciado:
+            if lowered == "/fim":
+                return self._finish_enunciado()
+            self._enunciado_lines.append(stripped)
+            return SessionReply("")
+        if lowered == "/enunciado":
+            self._awaiting_enunciado = True
+            self._enunciado_lines = []
+            return SessionReply("Cole o enunciado e termine com /fim na última linha.")
         if lowered == "/pdf":
             return self._list_pdfs()
         if lowered == "/desfazer":
@@ -825,7 +859,9 @@ class AssistantSession:
         if lowered == "/relatorio":
             return SessionReply(self.evidence.render())
         if lowered == "/ajuda":
-            return SessionReply("Comandos: /pdf, /desfazer, /relatorio, /ajuda e /sair.")
+            return SessionReply(
+                "Comandos: /enunciado, /pdf, /desfazer, /relatorio, /ajuda e /sair."
+            )
         if self._awaiting_pdf_choice:
             return self._select_pdf(stripped)
         if self._ambiguities:

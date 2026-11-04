@@ -386,5 +386,58 @@ Crie uma classe Frota (main) que teste os métodos.
             session.close()
 
 
+class PastedEnunciadoTests(unittest.TestCase):
+    def _session(self, root: Path) -> AssistantSession:
+        project = root / "projeto"
+        project.mkdir()
+        template = root / "criterios.md"
+        template.write_text("Java POO.\n", encoding="utf-8")
+        return AssistantSession(
+            config=AppConfig(project, root / "data", root / "config", root / "state"),
+            model=ScriptedModel([]),
+            pdf_extractor=FixedExtractor(""),
+            toolchain=JavaToolchain(project),
+            criteria_template=template,
+        )
+
+    def test_pasted_text_enunciado_produces_same_contract_as_pdf(self) -> None:
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("CLASSE: Conta\n- saldo: int\n+ Conta(int)")
+                reply = session.handle("/fim")
+
+                self.assertIn("Conta", reply.text)
+                assert session._contract is not None
+                self.assertEqual([item.name for item in session._contract.classes], ["Conta"])
+            finally:
+                session.close()
+
+    def test_pasted_text_without_classes_asks_instead_of_generating(self) -> None:
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("texto qualquer sem diagrama")
+                reply = session.handle("/fim")
+
+                self.assertIn("não reconheci", reply.text.casefold())
+                self.assertIsNone(session._contract)
+            finally:
+                session.close()
+
+    def test_paste_mode_is_cancelled_by_sair(self) -> None:
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                reply = session.handle("/sair")
+
+                self.assertTrue(reply.exit_requested)
+            finally:
+                session.close()
+
+
 if __name__ == "__main__":
     unittest.main()

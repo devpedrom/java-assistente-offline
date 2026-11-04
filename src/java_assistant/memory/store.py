@@ -18,6 +18,10 @@ def pdf_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def project_identifier(root: Path) -> str:
     return hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()
 
