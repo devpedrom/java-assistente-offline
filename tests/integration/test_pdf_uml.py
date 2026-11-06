@@ -162,6 +162,29 @@ LEGENDA UML
             any(Path(call[0]).name.startswith("tesseract") for call in runner.calls)
         )
 
+    def test_missing_ocr_falls_back_to_prose_text_layer(self) -> None:
+        prose = "Classe Conta:\n  saldo: Double\n"
+
+        def runner(args, **kwargs):
+            command = [str(value) for value in args]
+            executable = Path(command[0]).name
+            if executable.startswith("pdfimages"):
+                row = "   1     0 image    1593  1131  gray    1   8  jpeg   no"
+                return completed(command, stdout=row)
+            if executable.startswith("pdftotext"):
+                Path(command[-1]).write_text(prose, encoding="utf-8")
+                return completed(command)
+            raise OSError(f"{executable} não encontrado")
+
+        with TemporaryDirectory() as temp:
+            pdf = Path(temp) / "enunciado-misto.pdf"
+            pdf.touch()
+            evidence = PdfExtractor(runner=runner).extract(pdf)
+
+        self.assertEqual("text", evidence.source)
+        self.assertIn("OCR indisponível", " ".join(evidence.warnings))
+        self.assertIn("Classe Conta", evidence.text)
+
     def test_prose_only_pdf_without_images_skips_ocr(self) -> None:
         prose = "Enunciado sem diagrama.\n- desconto de 10% no total.\n"
         runner = FakeRunner(text_layer=prose, has_images=False)

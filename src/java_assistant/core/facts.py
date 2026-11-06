@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Protocol
 
-from .spec import Requirement, Specification, Unit, members_of
+from .spec import Requirement, Specification, Unit, find_unit, members_of
 
 
 _RULE_KINDS = frozenset({"factor", "upper_bound", "super_call", "divisor"})
@@ -15,6 +15,12 @@ _PERCENT_UP = re.compile(
 )
 _PERCENT_DOWN = re.compile(
     r"redu\w*\s+(?:em|de)\s+(\d+(?:[.,]\d+)?)\s*%", re.IGNORECASE
+)
+_PERCENT_ACRESCIMO = re.compile(
+    r"acr[ée]scimo\s+de\s+(\d+(?:[.,]\d+)?)\s*%", re.IGNORECASE
+)
+_PERCENT_DESCONTO = re.compile(
+    r"desconto\s+de\s+(\d+(?:[.,]\d+)?)\s*%", re.IGNORECASE
 )
 _HALF = re.compile(r"pela\s+metade|reduzid\w*\s+pela\s+metade", re.IGNORECASE)
 _DOUBLE = re.compile(
@@ -30,6 +36,13 @@ _DIVIDE = re.compile(
     re.IGNORECASE,
 )
 _COMMENTS = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+_CALL = re.compile(r"([A-Za-z_$][\w$]*)\s*\(")
+_METHOD_HEADER = re.compile(
+    r"^\s*(?:[+\-#~]\s*)?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::.*)?$"
+)
+_CLASS_HEADING = re.compile(
+    r"^\s*(?:class|classe|interface)\b", re.IGNORECASE
+)
 
 
 def _strip_comments(source: str) -> str:
@@ -94,6 +107,71 @@ def _effective_requirements(spec: Specification) -> tuple[Requirement, ...]:
     )
 
 
+def _block_for(text: str, position: int, unit: Unit | None) -> str:
+    """The method block or paragraph that contains ``position``.
+
+    Exercise statements often describe a whole class in prose, with a method
+    header followed by conditional percentages. Binding every factor to the
+    whole class text would name unrelated fields (for example the ``setor``
+    line) as the base of a salary discount. Using the local block keeps each
+    factor tied to the method that declares it.
+    """
+    lines = text.splitlines()
+    if not lines:
+        return text
+    index = min(text.count("\n", 0, position), len(lines) - 1)
+
+    def is_header(candidate: int) -> bool:
+        return _METHOD_HEADER.match(lines[candidate]) is not None
+
+    def is_unit_method(candidate: int) -> bool:
+        match = _METHOD_HEADER.match(lines[candidate])
+        if match is None:
+            return False
+        if unit is None:
+            return True
+        return any(
+            member.kind == "method" and member.name == match.group(1)
+            for member in members_of(unit, "method")
+        )
+
+    start: int | None = None
+    for candidate in range(index, -1, -1):
+        if _CLASS_HEADING.match(lines[candidate]):
+            break
+        if is_unit_method(candidate):
+            start = candidate
+            break
+        if not lines[candidate].strip():
+            break
+    if start is None:
+        start = index
+        while (
+            start > 0
+            and lines[start - 1].strip()
+            and not _CLASS_HEADING.match(lines[start - 1])
+        ):
+            start -= 1
+        end = index + 1
+        while (
+            end < len(lines)
+            and lines[end].strip()
+            and not _CLASS_HEADING.match(lines[end])
+        ):
+            end += 1
+        return "\n".join(lines[start:end]).strip()
+
+    end = len(lines)
+    for candidate in range(start + 1, len(lines)):
+        if _CLASS_HEADING.match(lines[candidate]) or is_header(candidate):
+            end = candidate
+            break
+        if not lines[candidate].strip():
+            end = candidate
+            break
+    return "\n".join(lines[start:end]).strip()
+
+
 def _super_call_rules(spec: Specification) -> list[Rule]:
     units = {unit.name: unit for unit in spec.units}
     rules: list[Rule] = []
@@ -136,20 +214,50 @@ def extract_rules(spec: Specification) -> tuple[Rule, ...]:
             seen.add(key)
             rules.append(Rule(kind, scope, value, text, detail))
 
+    units = {unit.name: unit for unit in spec.units}
     for requirement in _effective_requirements(spec):
         text = requirement.text
+        unit = units.get(requirement.scope) if requirement.scope else None
+
+        def block(position: int) -> str:
+            return _block_for(text, position, unit)
+
         for match in _PERCENT_UP.finditer(text):
-            add("factor", requirement.scope, 1 + _number(match.group(1)) / 100, text)
+            add(
+                "factor",
+                requirement.scope,
+                1 + _number(match.group(1)) / 100,
+                block(match.start()),
+            )
         for match in _PERCENT_DOWN.finditer(text):
-            add("factor", requirement.scope, 1 - _number(match.group(1)) / 100, text)
-        if _HALF.search(text):
-            add("factor", requirement.scope, 0.5, text)
-        if _DOUBLE.search(text):
-            add("factor", requirement.scope, 2.0, text)
-        if _QUARTER.search(text):
-            add("factor", requirement.scope, 0.75, text)
-        if _UPPER_BOUND.search(text):
-            add("upper_bound", requirement.scope, None, text)
+            add(
+                "factor",
+                requirement.scope,
+                1 - _number(match.group(1)) / 100,
+                block(match.start()),
+            )
+        for match in _PERCENT_ACRESCIMO.finditer(text):
+            add(
+                "factor",
+                requirement.scope,
+                1 + _number(match.group(1)) / 100,
+                block(match.start()),
+            )
+        for match in _PERCENT_DESCONTO.finditer(text):
+            add(
+                "factor",
+                requirement.scope,
+                1 - _number(match.group(1)) / 100,
+                block(match.start()),
+            )
+        for match in _HALF.finditer(text):
+            add("factor", requirement.scope, 0.5, block(match.start()))
+        for match in _DOUBLE.finditer(text):
+            add("factor", requirement.scope, 2.0, block(match.start()))
+        for match in _QUARTER.finditer(text):
+            add("factor", requirement.scope, 0.75, block(match.start()))
+        for match in _UPPER_BOUND.finditer(text):
+            add("upper_bound", requirement.scope, None, block(match.start()))
         fields = _fields_of(spec, requirement.scope) if requirement.scope else ()
         for match in _DIVIDE.finditer(text):
             divisor = next(
@@ -161,7 +269,13 @@ def extract_rules(spec: Specification) -> tuple[Rule, ...]:
                 None,
             )
             if divisor is not None:
-                add("divisor", requirement.scope, None, text, divisor)
+                add(
+                    "divisor",
+                    requirement.scope,
+                    None,
+                    block(match.start()),
+                    divisor,
+                )
 
     for rule in _super_call_rules(spec):
         add(rule.kind, rule.unit, rule.value, rule.text)
@@ -257,8 +371,19 @@ def issues(
     unit: Unit,
     source: str,
     matchers: SourceMatchers,
+    parent: Unit | None = None,
 ) -> tuple[str, ...]:
     source = _strip_comments(source)
+    inherited: dict[str, set[float]] = {}
+    if parent is not None:
+        for inherited_rule in rules:
+            if inherited_rule.kind != "factor" or inherited_rule.unit != parent.name:
+                continue
+            inherited_method = _rule_method(inherited_rule.text, parent)
+            if inherited_method and inherited_rule.value is not None:
+                inherited.setdefault(inherited_method, set()).add(
+                    inherited_rule.value
+                )
     found: list[str] = []
     for rule in rules:
         if rule.unit is not None and rule.unit != unit.name:
@@ -270,7 +395,20 @@ def issues(
             scoped = body if body is not None else source
             where = f"no método {method}" if body is not None else "no arquivo"
             literal = _literal(rule.value)
-            missing_factor = not matchers.factor(rule.value).search(scoped)
+            # A subclass may reuse the superclass calculation instead of repeating
+            # the discount: super.metodo() * acrescimo applies the inherited factor
+            # once, which is exactly what the criteria demand.
+            delegates_to_parent = bool(
+                method
+                and re.search(
+                    rf"\bsuper\s*\.\s*{re.escape(method)}\s*\(", scoped
+                )
+                and rule.value in inherited.get(method, set())
+            )
+            missing_factor = (
+                not matchers.factor(rule.value).search(scoped)
+                and not delegates_to_parent
+            )
             named = _named_fields(rule, unit)
             field_present = any(
                 re.search(_operand(name), scoped) for name in named
@@ -336,6 +474,23 @@ def issues(
     return tuple(found)
 
 
+def _foreign_method_entries(
+    spec: Specification, requirement: Requirement
+) -> list[tuple[str, str]]:
+    """Where cited helper methods live, when not on the requirement's own unit."""
+    own = find_unit(spec, requirement.scope) if requirement.scope else None
+    cited = set(_CALL.findall(requirement.text))
+    entries: list[tuple[str, str]] = []
+    for unit in spec.units:
+        if own is not None and unit.name == own.name:
+            continue
+        for member in members_of(unit, "method"):
+            if member.name in cited:
+                signature = ", ".join(type_name for _, type_name in member.parameters)
+                entries.append((f"{member.name}({signature})", unit.name))
+    return list(dict.fromkeys(entries))
+
+
 def requirements_section(spec: Specification, unit: Unit) -> str:
     """Confirmed requirement text for the unit, scoped first, then general."""
     selected = [
@@ -350,49 +505,76 @@ def requirements_section(spec: Specification, unit: Unit) -> str:
     for requirement in selected:
         scope = requirement.scope or "geral"
         lines.append(f"[{requirement.origin} | {scope}] {requirement.text}")
+        entries = _foreign_method_entries(spec, requirement)
+        if entries:
+            owners = "; ".join(
+                f"{signature} -> {owner}" for signature, owner in entries
+            )
+            names = ", ".join(
+                dict.fromkeys(signature.split("(", 1)[0] for signature, _ in entries)
+            )
+            lines.append("Métodos citados pertencem a: " + owners)
+            lines.append(
+                f"Use exatamente estes nomes, sem renomear: {names}. Chame cada um "
+                "no objeto já convertido para a classe que o declara, por exemplo "
+                "((Subclasse) objeto).metodo(texto); nunca no tipo base e nunca "
+                "repetindo o método que está sendo escrito."
+            )
     return "\n".join(lines)
 
 
 def prompt_section(rules: tuple[Rule, ...], unit: Unit) -> str:
-    lines: dict[str, list[str]] = {
-        "factor": [],
-        "upper_bound": [],
-        "super_call": [],
-        "divisor": [],
-    }
+    factor_groups: dict[str | None, list[Rule]] = {}
+    upper_bound: list[str] = []
+    super_call: list[str] = []
+    divisor: list[str] = []
     for rule in rules:
         if rule.unit is not None and rule.unit != unit.name:
             continue
         if rule.kind == "factor":
             assert rule.value is not None
-            method = _rule_method(rule.text, unit)
-            where = f" (no método {method})" if method else ""
-            named = _named_fields(rule, unit)
-            base = named[0] if len(named) == 1 else "base"
-            lines["factor"].append(
-                f"{rule.text.strip()} => {base} * {_literal(rule.value)}{where}"
-            )
+            factor_groups.setdefault(_rule_method(rule.text, unit), []).append(rule)
         elif rule.kind == "upper_bound":
-            lines["upper_bound"].append(
+            upper_bound.append(
                 f"{rule.text.strip()} => valide explicitamente e rejeite o valor "
                 "que exceder o limite"
             )
         elif rule.kind == "divisor":
             method = _rule_method(rule.text, unit)
             where = f" (no método {method})" if method else ""
-            lines["divisor"].append(
-                f"{rule.text.strip()} => base / {rule.detail}{where}"
-            )
+            divisor.append(f"{rule.text.strip()} => base / {rule.detail}{where}")
         else:
-            lines["super_call"].append(
-                f"{rule.text}: retorne somente super.{rule.text}()"
+            super_call.append(f"{rule.text}: retorne somente super.{rule.text}()")
+
+    parts: list[str] = []
+    if factor_groups:
+        block: list[str] = []
+        for method, group in factor_groups.items():
+            where = f"método {method}" if method else "cálculo"
+            block.append(f"[{where}]")
+            for text in dict.fromkeys(rule.text.strip() for rule in group):
+                block.append(text)
+            factors: list[str] = []
+            for rule in group:
+                named = _named_fields(rule, unit)
+                base = named[0] if len(named) == 1 else "base"
+                factors.append(f"{base} * {_literal(rule.value)}")
+            block.append(
+                "Aplique TODOS estes fatores em cada caminho de execução, "
+                "multiplicando-os: " + "; ".join(dict.fromkeys(factors))
             )
-    titles = {
-        "factor": "FATOS ARITMÉTICOS OBRIGATÓRIOS",
-        "upper_bound": "LIMITES OBRIGATÓRIOS",
-        "super_call": "SOBRESCRITA SEM NOVO EFEITO",
-        "divisor": "DIVISÕES OBRIGATÓRIAS",
-    }
-    return "\n".join(
-        f"{titles[kind]}:\n" + "\n".join(items) for kind, items in lines.items() if items
-    )
+            if len(group) > 1:
+                block.append(
+                    "Se as categorias são alternativas (por exemplo SENIOR/JUNIOR), use "
+                    "if/else: em cada ramo aplique o fator daquela categoria MAIS todos "
+                    "os fatores comuns (como o desconto). Em um ramo sem acréscimo, "
+                    "use o fator 1.0 e ainda aplique os descontos comuns."
+                )
+        parts.append("FATOS ARITMÉTICOS OBRIGATÓRIOS:\n" + "\n".join(block))
+    if upper_bound:
+        parts.append("LIMITES OBRIGATÓRIOS:\n" + "\n".join(upper_bound))
+    if super_call:
+        parts.append("SOBRESCRITA SEM NOVO EFEITO:\n" + "\n".join(super_call))
+    if divisor:
+        parts.append("DIVISÕES OBRIGATÓRIAS:\n" + "\n".join(divisor))
+    return "\n".join(parts)

@@ -152,6 +152,48 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Java8Adapter().parse_unit_source("public interface Veiculo {}", self.unit)
 
+    def test_rejects_unbalanced_or_truncated_bodies(self) -> None:
+        adapter = Java8Adapter()
+
+        for reply in (
+            "public class Veiculo {\n    public void mover() {\n",
+            "public class Veiculo { public void mover() { if (true) { } }",
+            "public class Veiculo { } }",
+        ):
+            with self.assertRaises(ValueError):
+                adapter.parse_unit_source(reply, self.unit)
+
+    def test_ignores_delimiters_inside_strings_and_comments(self) -> None:
+        adapter = Java8Adapter()
+        reply = (
+            "public class Veiculo {\n"
+            "    // chave aberta {\n"
+            "    /* chave fechada } */\n"
+            '    String texto = "}{";\n'
+            "    char chave = '}';\n"
+            "}\n"
+        )
+
+        self.assertEqual(reply, adapter.parse_unit_source(reply, self.unit))
+
+    def test_rejects_a_reply_that_echoes_the_prompt(self) -> None:
+        adapter = Java8Adapter()
+        reply = (
+            "public class Veiculo {}\n\n"
+            "VERIFICAÇÃO GERAL: aumento de X% = base * (1 + X/100)."
+        )
+
+        with self.assertRaises(ValueError):
+            adapter.parse_unit_source(reply, self.unit)
+
+    def test_rejects_extra_type_declarations_in_the_same_file(self) -> None:
+        adapter = Java8Adapter()
+
+        with self.assertRaises(ValueError):
+            adapter.parse_unit_source(
+                "public class Veiculo {}\nclass Carro {}", self.unit
+            )
+
     def test_rejects_incomplete_blocks_and_mixed_actions(self) -> None:
         adapter = Java8Adapter()
 
@@ -281,6 +323,16 @@ class InspectionTests(unittest.TestCase):
             ),
         )
         self.assertEqual("", adapter.diagnostic_hint("error: something else"))
+
+    def test_private_access_hint_names_the_getter(self) -> None:
+        adapter = Java8Adapter()
+
+        hint = adapter.diagnostic_hint(
+            "Biblioteca.java:38: error: nome has private access in Funcionario"
+        )
+
+        self.assertIn("getNome()", hint)
+        self.assertIn("Funcionario", hint)
 
     def test_entry_point_requires_a_static_main(self) -> None:
         adapter = Java8Adapter()

@@ -854,6 +854,158 @@ class SolverTests(unittest.TestCase):
 
         self.assertIn("super(id, ativo)", model.calls[2][-1].content)
 
+    def test_generation_prompt_shows_the_parent_constructor_order(self) -> None:
+        base = Unit(
+            "Base",
+            "class",
+            (
+                Member(
+                    "Base",
+                    "constructor",
+                    "Base",
+                    "public",
+                    (("nome", "String"), ("salario", "Double"), ("registro", "int")),
+                ),
+            ),
+        )
+        child = Unit(
+            "Conta",
+            "class",
+            (
+                Member(
+                    "Conta",
+                    "constructor",
+                    "Conta",
+                    "public",
+                    (
+                        ("registro", "int"),
+                        ("cargo", "String"),
+                        ("nome", "String"),
+                        ("salario", "Double"),
+                    ),
+                ),
+            ),
+        )
+        spec = trusted(
+            base,
+            child,
+            relationships=(Relationship("Base", "Conta", "inheritance", 1.0),),
+        )
+        with TemporaryDirectory() as temp:
+            solver, model, _, _ = self._solver(
+                Path(temp),
+                spec,
+                replies=[
+                    "public class Base {}",
+                    "public class Conta {}",
+                ],
+                adapter=JavaPromptAdapter(),
+                toolchain=FakeToolchain(),
+            )
+
+            solver.run("crie Conta")
+
+        system = next(
+            message.content
+            for message in model.calls[1]
+            if "CONSTRUTOR DA SUPERCLASSE" in message.content
+        )
+        self.assertIn("super(nome, salario, registro)", system)
+
+    def test_parent_arguments_use_field_names_when_javap_hides_them(self) -> None:
+        base = Unit(
+            "Base",
+            "class",
+            (
+                Member("nome", "field", "String", "private"),
+                Member("salario", "field", "Double", "private"),
+                Member("registro", "field", "int", "private"),
+                Member(
+                    "Base",
+                    "constructor",
+                    "Base",
+                    "public",
+                    (("arg1", "String"), ("arg2", "Double"), ("arg3", "int")),
+                ),
+            ),
+        )
+        child = Unit(
+            "Conta",
+            "class",
+            (
+                Member(
+                    "Conta",
+                    "constructor",
+                    "Conta",
+                    "public",
+                    (
+                        ("arg1", "int"),
+                        ("arg2", "String"),
+                        ("arg3", "String"),
+                        ("arg4", "Double"),
+                    ),
+                ),
+            ),
+        )
+        spec = trusted(
+            base,
+            child,
+            relationships=(Relationship("Base", "Conta", "inheritance", 1.0),),
+        )
+        with TemporaryDirectory() as temp:
+            solver, model, _, _ = self._solver(
+                Path(temp),
+                spec,
+                replies=[
+                    "public class Base {}",
+                    "public class Conta {}",
+                ],
+                adapter=JavaPromptAdapter(),
+                toolchain=FakeToolchain(),
+            )
+
+            solver.run("crie Conta")
+
+        system = next(
+            message.content
+            for message in model.calls[1]
+            if "CONSTRUTOR DA SUPERCLASSE" in message.content
+        )
+        self.assertIn("super(nome, salario, registro)", system)
+        self.assertNotIn("super(arg1, arg2, arg3)", system)
+
+    def test_generation_shows_sources_of_referenced_types(self) -> None:
+        saldo = Unit(
+            "Saldo",
+            "class",
+            (Member("total", "field", "Double", "private"),),
+        )
+        conta = Unit(
+            "Conta",
+            "class",
+            (Member("saldo", "field", "Saldo", "private"),),
+        )
+        spec = trusted(saldo, conta)
+        with TemporaryDirectory() as temp:
+            solver, model, _, _ = self._solver(
+                Path(temp),
+                spec,
+                replies=[
+                    "public class Saldo {}",
+                    "public class Conta {}",
+                ],
+                adapter=JavaPromptAdapter(),
+                toolchain=FakeToolchain(),
+            )
+
+            solver.run("crie Conta e Saldo")
+
+        system = "\n".join(
+            message.content for message in model.calls[1]
+        )
+        self.assertIn("ARQUIVO: Saldo.java", system)
+        self.assertIn("public class Saldo {}", system)
+
     def test_rewrite_prompt_drops_the_old_file(self) -> None:
         spec = trusted(unit("Conta"))
         with TemporaryDirectory() as temp:

@@ -169,6 +169,22 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(("Tipo", "Owner"), association_ordered.order)
         self.assertEqual((), association_ordered.issues)
 
+    def test_method_parameter_types_are_generated_before_the_referrer(self) -> None:
+        registry = Unit(
+            "Registro",
+            "class",
+            (
+                Member("somar", "method", "double", "public", (("item", "Item"),)),
+                Member("ultimo", "method", "Item", "public"),
+            ),
+        )
+        spec = spec_with((registry, plain("Item"), plain("Outro")))
+
+        result = plan(spec)
+
+        self.assertEqual(("Item", "Outro", "Registro"), result.order)
+        self.assertEqual((), result.issues)
+
     def test_mutual_field_dependency_is_not_a_cycle(self) -> None:
         spec = spec_with(
             (

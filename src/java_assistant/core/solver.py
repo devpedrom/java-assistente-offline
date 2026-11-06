@@ -104,11 +104,12 @@ def plan(spec: Specification) -> Plan:
     }
     for unit in spec.units:
         for member in unit.members:
-            if member.kind != "field":
-                continue
-            for type_name in _TYPE_TOKEN.findall(member.type_name):
-                if type_name in seen and type_name != unit.name:
-                    soft.add((type_name, unit.name))
+            types = [member.type_name]
+            types.extend(type_name for _, type_name in member.parameters)
+            for declared in types:
+                for type_name in _TYPE_TOKEN.findall(declared):
+                    if type_name in seen and type_name != unit.name:
+                        soft.add((type_name, unit.name))
     order: list[str] = []
     while remaining:
         ready = sorted(
@@ -692,8 +693,23 @@ class Solver:
         if not (self.workspace.root / relative).is_file():
             return ()
         return issues(
-            rules, unit, self.workspace.read(relative), self.adapter.matchers()
+            rules,
+            unit,
+            self.workspace.read(relative),
+            self.adapter.matchers(),
+            self._parent_unit(unit),
         )
+
+    def _parent_unit(self, unit: Unit) -> Unit | None:
+        parent = next(
+            (
+                relationship.parent
+                for relationship in self.spec.relationships
+                if relationship.kind == "inheritance" and relationship.child == unit.name
+            ),
+            None,
+        )
+        return find_unit(self.spec, parent) if parent is not None else None
 
     def _sources(self) -> list[Path]:
         return sorted(
@@ -705,25 +721,44 @@ class Solver:
         )
 
     def _parent_sources(self, unit: Unit) -> str:
-        parts: list[str] = []
+        names: list[str] = []
         for relationship in self.spec.relationships:
             if (
                 relationship.child == unit.name
                 and relationship.kind in _EDGE_KINDS
                 and relationship.confidence >= CONFIDENCE_FLOOR
             ):
-                path = Path(f"{relationship.parent}{self.adapter.source_extension}")
-                if (self.workspace.root / path).is_file():
-                    parts.append(
-                        f"ARQUIVO: {path.as_posix()}\n```\n"
-                        f"{self.workspace.read(path)}\n```"
-                    )
+                names.append(relationship.parent)
+        # A class that stores or receives another one needs its public API to
+        # avoid touching private fields; only files already generated are shown.
+        for member in unit.members:
+            if member.kind == "field":
+                names.append(member.type_name)
+            elif member.kind == "method":
+                names.append(member.type_name)
+            names.extend(type_name for _, type_name in member.parameters)
+        parts: list[str] = []
+        for name in dict.fromkeys(names):
+            name = name.replace("[]", "").strip()
+            if name == unit.name or find_unit(self.spec, name) is None:
+                continue
+            path = Path(f"{name}{self.adapter.source_extension}")
+            if not (self.workspace.root / path).is_file():
+                continue
+            parts.append(
+                f"ARQUIVO: {path.as_posix()}\n```\n"
+                f"{self.workspace.read(path)}\n```"
+            )
         return "\n\n".join(parts)
 
     def _parent_constructor_hint(self, unit: Unit, diagnostic: str) -> str:
         """A constructor mismatch is fixed only if the model sees the parent's signature."""
         normalized = diagnostic.casefold()
-        if "constructor" not in normalized and "not applicable" not in normalized:
+        if (
+            "constructor" not in normalized
+            and "not applicable" not in normalized
+            and "super(" not in normalized
+        ):
             return ""
         parent = next(
             (
@@ -736,24 +771,122 @@ class Solver:
         parent_unit = find_unit(self.spec, parent) if parent is not None else None
         if parent_unit is None:
             return ""
-        signatures = [
-            f"super({', '.join(name for name, _ in member.parameters)})"
-            for member in parent_unit.members
-            if member.kind == "constructor" and member.parameters
-        ]
+        child_constructor = next(
+            (
+                member
+                for member in unit.members
+                if member.kind == "constructor"
+            ),
+            None,
+        )
+        signatures: list[str] = []
+        for member in parent_unit.members:
+            if member.kind != "constructor" or not member.parameters:
+                continue
+            parameters = self._parent_parameter_names(parent_unit, member)
+            typed = ", ".join(
+                f"{name}: {type_name}" for name, type_name in parameters
+            )
+            arguments = self._super_arguments(member, child_constructor, parameters)
+            signatures.append(f"super({', '.join(arguments)})  // {parent_unit.name}({typed})")
         if not signatures:
             return ""
         return (
             f"\nCONSTRUTOR DA SUPERCLASSE {parent_unit.name}: a primeira linha do "
-            "construtor precisa ser uma destas chamadas, com todos os argumentos: "
-            + " ou ".join(signatures)
+            "construtor precisa ser uma destas chamadas, com os argumentos na ORDEM "
+            "da assinatura do pai: " + " ou ".join(signatures)
         )
+
+    @staticmethod
+    def _parent_parameter_names(
+        parent_unit: Unit, constructor
+    ) -> tuple[tuple[str, str], ...]:
+        """javap reports arg1/arg2; the parent's fields carry the real meaning."""
+        fields = [member for member in parent_unit.members if member.kind == "field"]
+        used: set[str] = set()
+        mapped: list[tuple[str, str]] = []
+        for position, (name, type_name) in enumerate(constructor.parameters):
+            if not re.fullmatch(r"arg\d+", name):
+                mapped.append((name, type_name))
+                used.add(name)
+                continue
+            same_type = [
+                field
+                for field in fields
+                if field.type_name == type_name and field.name not in used
+            ]
+            positional = (
+                fields[position]
+                if position < len(fields)
+                and fields[position].type_name == type_name
+                and fields[position].name not in used
+                else None
+            )
+            chosen = positional or (same_type[0] if same_type else None)
+            if chosen is None:
+                mapped.append((name, type_name))
+                continue
+            mapped.append((chosen.name, type_name))
+            used.add(chosen.name)
+        return tuple(mapped)
+
+    @staticmethod
+    def _super_arguments(
+        parent_constructor, child_constructor, parameters=None
+    ) -> tuple[str, ...]:
+        """Reuse the child's own parameter names, matched by the parent's types."""
+        parameters = tuple(parameters or parent_constructor.parameters)
+        synthetic_child = child_constructor is None or all(
+            re.fullmatch(r"arg\d+", name)
+            for name, _ in child_constructor.parameters
+        )
+        if synthetic_child:
+            return tuple(name for name, _ in parameters)
+        available = list(child_constructor.parameters)
+        arguments: list[str] = []
+        for name, type_name in parameters or parent_constructor.parameters:
+            named = next(
+                (
+                    position
+                    for position, (candidate, candidate_type) in enumerate(available)
+                    if candidate == name and candidate_type == type_name
+                ),
+                None,
+            )
+            if named is not None:
+                arguments.append(available.pop(named)[0])
+                continue
+            index = next(
+                (
+                    position
+                    for position, (_, candidate) in enumerate(available)
+                    if candidate == type_name
+                ),
+                None,
+            )
+            if index is None:
+                arguments.append(name)
+            else:
+                arguments.append(available.pop(index)[0])
+        return tuple(arguments)
+
+    def _unit_diagnostics(self, diagnostic: str, unit: Unit) -> str:
+        """Only this unit's javac blocks; other files' errors would mislead the model."""
+        blocks = re.split(r"(?m)^(?=.+?\.java:\d+:)", diagnostic)
+        marker = f"{unit.name}{self.adapter.source_extension}:"
+        selected = [
+            block
+            for block in blocks
+            if block.splitlines() and marker in block.splitlines()[0]
+        ]
+        return "\n".join(selected).strip() or diagnostic
 
     def _unit_prompt(
         self, unit: Unit, request: str, rules, diagnostic: str, keep_current: bool
     ) -> list[Message]:
         user_request = request
         if diagnostic:
+            diagnostic = self._unit_diagnostics(diagnostic, unit)
             current = ""
             target_path = Path(f"{unit.name}{self.adapter.source_extension}")
             if keep_current and (self.workspace.root / target_path).is_file():
@@ -768,15 +901,23 @@ class Solver:
                 if keep_current
                 else "\n\nReescreva o arquivo do zero; não copie o anterior."
             )
+            signatures = self.adapter.unit_contract(self.spec, unit)
             user_request = (
                 f"{request}\n\nERRO DA VERIFICAÇÃO ANTERIOR:\n{diagnostic}\n{hint}"
                 f"{constructors}{current}{rewrite}"
+                f"\n\nDECLARAÇÕES QUE NÃO PODEM MUDAR:\n{signatures}"
             ).rstrip()
+        has_constructor = any(
+            member.kind == "constructor" for member in unit.members
+        )
         target = "\n\n".join(
             part
             for part in (
                 self.adapter.unit_contract(self.spec, unit),
                 requirements_section(self.spec, unit),
+                ""
+                if diagnostic or not has_constructor
+                else self._parent_constructor_hint(unit, "constructor").strip(),
             )
             if part
         )
@@ -785,7 +926,17 @@ class Solver:
             "criteria": self.criteria,
             "spec_target": target,
             "parents": self._parent_sources(unit),
-            "pdf_excerpt": self.pdf_text,
+            # A scoped requirement already repeats the unit's statement verbatim.
+            # Sending the raw PDF again only spends context and, when the excerpt
+            # is truncated, shows the model half of another class's rules.
+            "pdf_excerpt": (
+                ""
+                if any(
+                    requirement.scope == unit.name
+                    for requirement in self.spec.requirements
+                )
+                else self.pdf_text
+            ),
             "rules": prompt_section(rules, unit),
             "memory": self.memory_summary,
             "user_request": user_request,
@@ -817,7 +968,13 @@ class Solver:
                 last_error = str(error)
             else:
                 last_error = " ".join(
-                    issues(rules, unit, source, self.adapter.matchers())
+                    issues(
+                        rules,
+                        unit,
+                        source,
+                        self.adapter.matchers(),
+                        self._parent_unit(unit),
+                    )
                 )
                 # With a local checker the execution decides, so the textual facts
                 # only get one chance to steer the model before the file is kept.
@@ -834,12 +991,13 @@ class Solver:
                     return None
             if attempt == 0 and diagnostic:
                 messages = self._unit_prompt(unit, request, rules, diagnostic, False)
-            messages.append(Message("assistant", reply.content[:2000]))
             messages.append(
                 Message(
                     "user",
-                    f"A resposta foi rejeitada: {last_error}. Retorne SOMENTE "
-                    f"{unit.name}{self.adapter.source_extension} completo.",
+                    f"A resposta anterior foi rejeitada ({last_error}). Comece de "
+                    f"novo e retorne SOMENTE {unit.name}"
+                    f"{self.adapter.source_extension} completo, sem explicar e sem "
+                    "continuar o texto anterior.",
                 )
             )
         return f"Parei ao gerar {relative}: {last_error}"

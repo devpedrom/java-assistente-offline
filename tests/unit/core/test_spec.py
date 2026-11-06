@@ -141,6 +141,51 @@ class UmlExtractionTests(unittest.TestCase):
         self.assertIn(("Veiculo", "Carro", "inheritance"), relations)
         self.assertIn(("Veiculo", "Caminhao", "inheritance"), relations)
 
+    def test_extracts_prose_class_headings_constructors_and_methods(self) -> None:
+        evidence = PdfEvidence(
+            "Classe Conta:\n"
+            "  Construtor: Conta(String nome, Double saldo, int numero)\n"
+            "  saldo: Double\n"
+            "  calculaSaldo(): Retorna saldo com desconto de 10% para impostos.\n"
+            "Classe Especial:\n"
+            "  Construtor: Especial(int numero, String categoria, String nome, "
+            "Double saldo)\n"
+            "  categoria: “A” ou “B”.\n"
+            "  calculaSaldo():\n"
+            "    A: acréscimo de 30%.\n"
+            "    B: acréscimo de 10%.\n"
+            "    Aplicar desconto de 10% de impostos.\n",
+            "text",
+            (),
+        )
+
+        spec = UmlExtractor().extract(evidence)
+
+        self.assertEqual(("Conta", "Especial"), tuple(u.name for u in spec.units))
+        account = find_unit(spec, "Conta")
+        assert account is not None
+        constructor = members_of(account, "constructor")[0]
+        self.assertEqual(
+            ("nome", "saldo", "numero"),
+            tuple(name for name, _ in constructor.parameters),
+        )
+        self.assertEqual(
+            ("String", "Double", "int"),
+            tuple(type_name for _, type_name in constructor.parameters),
+        )
+        salary = members_of(account, "method")[0]
+        self.assertEqual("calculaSaldo", salary.name)
+        self.assertEqual("Double", salary.type_name)
+        special = find_unit(spec, "Especial")
+        assert special is not None
+        self.assertIn(
+            "categoria", tuple(member.name for member in members_of(special, "field"))
+        )
+        self.assertEqual(
+            {"Conta", "Especial"},
+            {item.scope for item in spec.requirements},
+        )
+
     def test_requirements_are_scoped_by_heading_and_preamble_is_general(self) -> None:
         evidence = PdfEvidence(
             "Regra geral: o valor nunca pode ser maior que o limite.\n"
