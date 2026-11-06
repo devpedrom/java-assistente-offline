@@ -87,7 +87,10 @@ class PdfExtractor:
             raise PdfExtractionError(f"Falha ao executar {Path(args[0]).name}: {exc}") from exc
 
     def _has_images(self, pdf: Path) -> bool:
-        result = self._run([self._pdfimages, "-list", str(pdf)])
+        try:
+            result = self._run([self._pdfimages, "-list", str(pdf)])
+        except PdfExtractionError:
+            return False
         return result.returncode == 0 and bool(_IMAGE_ROW.search(result.stdout))
 
     def extract(self, path: Path) -> PdfEvidence:
@@ -111,31 +114,46 @@ class PdfExtractor:
                 ):
                     return PdfEvidence(text=text_layer, source="text", warnings=())
 
-            prefix = work / "pagina"
-            render_result = self._run(
-                [self._pdftoppm, "-png", "-r", "300", str(pdf), str(prefix)]
+            try:
+                return self._ocr(pdf, work, text_layer)
+            except PdfExtractionError:
+                if not text_layer:
+                    raise
+                return PdfEvidence(
+                    text=text_layer,
+                    source="text",
+                    warnings=(
+                        "OCR indisponível ou vazio; usei somente o texto do PDF. "
+                        "Confirme nomes e relações do UML visual.",
+                    ),
+                )
+
+    def _ocr(self, pdf: Path, work: Path, text_layer: str) -> PdfEvidence:
+        prefix = work / "pagina"
+        render_result = self._run(
+            [self._pdftoppm, "-png", "-r", "300", str(pdf), str(prefix)]
+        )
+        if render_result.returncode != 0:
+            raise PdfExtractionError("Não foi possível renderizar o PDF para OCR.")
+
+        page_texts: list[str] = []
+        for image in sorted(work.glob("pagina-*.png")):
+            ocr_result = self._run(
+                [self._tesseract, str(image), "stdout", "-l", "por+eng", "tsv"]
             )
-            if render_result.returncode != 0:
-                raise PdfExtractionError("Não foi possível renderizar o PDF para OCR.")
+            if ocr_result.returncode == 0:
+                page = _tsv_to_text(ocr_result.stdout).strip()
+                if page:
+                    page_texts.append(page)
 
-            page_texts: list[str] = []
-            for image in sorted(work.glob("pagina-*.png")):
-                ocr_result = self._run(
-                    [self._tesseract, str(image), "stdout", "-l", "por+eng", "tsv"]
-                )
-                if ocr_result.returncode == 0:
-                    page = _tsv_to_text(ocr_result.stdout).strip()
-                    if page:
-                        page_texts.append(page)
-
-            text = "\n\n".join(page_texts).strip()
-            if not text:
-                raise PdfExtractionError(
-                    "O PDF não possui texto legível e o OCR não encontrou conteúdo."
-                )
-            warnings = ["Conteúdo obtido por OCR; confirme nomes e símbolos do UML."]
-            if text_layer:
-                warnings.append(
-                    "O texto do PDF não trazia membros UML; a página foi lida por OCR."
-                )
-            return PdfEvidence(text=text, source="ocr", warnings=tuple(warnings))
+        text = "\n\n".join(page_texts).strip()
+        if not text:
+            raise PdfExtractionError(
+                "O PDF não possui texto legível e o OCR não encontrou conteúdo."
+            )
+        warnings = ["Conteúdo obtido por OCR; confirme nomes e símbolos do UML."]
+        if text_layer:
+            warnings.append(
+                "O texto do PDF não trazia membros UML; a página foi lida por OCR."
+            )
+        return PdfEvidence(text=text, source="ocr", warnings=tuple(warnings))

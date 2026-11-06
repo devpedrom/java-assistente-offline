@@ -82,7 +82,10 @@ class LocalClassAdopterTests(unittest.TestCase):
                     Unit(
                         "Veiculo",
                         "class",
-                        (Member("passageiros", "field", "int", "protected"),),
+                        (
+                            Member("passageiros", "field", "int", "protected"),
+                            Member("inventado", "method", "void", "public"),
+                        ),
                     ),
                 ),
                 relationships=(
@@ -111,6 +114,9 @@ class LocalClassAdopterTests(unittest.TestCase):
         self.assertEqual(fields["passageiros"].visibility, "private")
         self.assertIn(
             "getPassageiros", {member.name for member in veiculo.members}
+        )
+        self.assertNotIn(
+            "inventado", {member.name for member in veiculo.members}
         )
         constructor = next(
             member

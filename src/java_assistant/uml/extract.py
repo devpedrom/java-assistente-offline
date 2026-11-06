@@ -12,12 +12,45 @@ from java_assistant.pdf.extract import PdfEvidence
 _TYPE = re.compile(
     r"^\s*(class|classe|interface)\s*:?\s*([A-Za-z_À-ÿ][\wÀ-ÿ]*)"
     r"(?:\s+extends\s+([\wÀ-ÿ]+))?"
-    r"(?:\s+implements\s+([\wÀ-ÿ]+(?:\s*,\s*[\wÀ-ÿ]+)*))?\s*$",
+    r"(?:\s+implements\s+([\wÀ-ÿ]+(?:\s*,\s*[\wÀ-ÿ]+)*))?\s*:?\s*$",
     re.IGNORECASE,
 )
 _FIELD = re.compile(r"^\s*([+\-#~])\s*([\wÀ-ÿ]+)\s*:\s*([^()]+?)\s*$")
 _METHOD = re.compile(
     r"^\s*([+\-#~])\s*([\wÀ-ÿ]+)\s*\(([^)]*)\)\s*(?::\s*(.+?))?\s*$"
+)
+_CONSTRUCTOR = re.compile(
+    r"^\s*(?:construtor|constructor)\s*:?\s*"
+    r"(?:([A-Za-z_À-ÿ][\wÀ-ÿ]*)\s*)?\(([^)]*)\)\s*$",
+    re.IGNORECASE,
+)
+_PROSE_METHOD = re.compile(
+    r"^\s*([A-Za-z_À-ÿ][\wÀ-ÿ]*)\s*\(([^)]*)\)\s*(.*)$"
+)
+_PROSE_FIELD = re.compile(
+    r"^\s*([a-z_À-ÿ][\wÀ-ÿ]*)\s*(\[\])?\s*:\s*(.+)$"
+)
+_BUILTIN_TYPES = frozenset(
+    {
+        "byte",
+        "short",
+        "int",
+        "long",
+        "float",
+        "double",
+        "boolean",
+        "char",
+        "void",
+        "Byte",
+        "Short",
+        "Integer",
+        "Long",
+        "Float",
+        "Double",
+        "Boolean",
+        "Character",
+        "String",
+    }
 )
 _INHERITANCE = re.compile(r"^\s*([\wÀ-ÿ]+)\s*<\|--\s*([\wÀ-ÿ]+)\s*$")
 _HERDA_DE = re.compile(r"^\s*herda\s+de\s*:\s*([\wÀ-ÿ]+)\s*$", re.IGNORECASE)
@@ -63,6 +96,72 @@ def _parameters(raw: str) -> tuple[tuple[str, str], ...]:
     return tuple(parsed)
 
 
+def _known_unit_names(lines: list[str]) -> frozenset[str]:
+    names: set[str] = set()
+    for raw in lines:
+        match = _TYPE.match(raw.strip())
+        if match:
+            names.add(match.group(2))
+    return frozenset(names)
+
+
+def _prose_return_type(rest: str, owner: str, known_names: frozenset[str]) -> str:
+    """Infer the return type from prose such as ``Calcula(): Retorna o saldo``.
+
+    The heuristic only fills the obvious cases. Exact signatures from compiled
+    classes still take precedence when they are present in the project folder.
+    """
+    value = rest.strip().lstrip(":").strip()
+    if not value:
+        return owner
+    folded = _fold_text(value)
+    first = re.split(r"[\s,.;:()]+", value, maxsplit=1)[0]
+    if first in _BUILTIN_TYPES:
+        return first
+    if '"' in value or "“" in value or "”" in value:
+        return "String"
+    if "boolean" in folded or "verdadeiro" in folded or "falso" in folded:
+        return "boolean"
+    if (
+        "double" in folded
+        or "salário" in folded
+        or "salario" in folded
+        or "saldo" in folded
+        or "valor" in folded
+        or "preço" in folded
+        or "preco" in folded
+    ):
+        return "Double"
+    if re.search(r"\b\d+\.\d+\b", value):
+        return "Double"
+    if "resposta" in folded or "string" in folded:
+        return "String"
+    for name in known_names:
+        if name != owner and re.search(
+            rf"\b{re.escape(_fold_text(name))}\b", folded
+        ):
+            return name
+    return owner
+
+
+def _prose_field_type(
+    value: str, array: bool, known_names: frozenset[str]
+) -> str | None:
+    """Infer a field type from ``campo: Tipo`` or ``campo: "A" ou "B"``."""
+    text = value.strip()
+    first = re.split(r"[\s,.;:()]+", text, maxsplit=1)[0]
+    suffix = "[]" if array else ""
+    if first in _BUILTIN_TYPES:
+        return first + suffix
+    if text[:1] in {'"', "“", "”", "'"}:
+        return "String" + suffix
+    folded = _fold_text(text)
+    for name in known_names:
+        if re.search(rf"\b{re.escape(_fold_text(name))}\b", folded):
+            return name + suffix
+    return None
+
+
 def requirements_for(
     text: str, units: tuple[Unit, ...], source: str
 ) -> tuple[Requirement, ...]:
@@ -81,6 +180,26 @@ class UmlExtractor:
         members: list[Member] = []
         confidence = _confidence(evidence.source)
         lines = evidence.text.splitlines()
+        known_names = _known_unit_names(lines)
+
+        def add_member(member: Member) -> None:
+            key = (
+                member.name,
+                member.kind,
+                tuple(type_name for _, type_name in member.parameters),
+                member.type_name,
+            )
+            if all(
+                (
+                    existing.name,
+                    existing.kind,
+                    tuple(type_name for _, type_name in existing.parameters),
+                    existing.type_name,
+                )
+                != key
+                for existing in members
+            ):
+                members.append(member)
 
         def finish_unit() -> None:
             nonlocal current_name, members
@@ -158,7 +277,7 @@ class UmlExtractor:
                     and [type_name for _, type_name in parameters] == ["String[]"]
                     else ()
                 )
-                members.append(
+                add_member(
                     Member(
                         name=name,
                         kind="constructor" if name == current_name else "method",
@@ -169,9 +288,40 @@ class UmlExtractor:
                     )
                 )
                 continue
+            constructor = _CONSTRUCTOR.match(stripped)
+            if constructor:
+                declared = constructor.group(1)
+                if declared is None or declared == current_name:
+                    add_member(
+                        Member(
+                            name=current_name,
+                            kind="constructor",
+                            type_name=current_name,
+                            visibility="public",
+                            parameters=_parameters(constructor.group(2)),
+                        )
+                    )
+                continue
+            prose_method = _PROSE_METHOD.match(stripped)
+            if prose_method:
+                name = prose_method.group(1)
+                if name != current_name and not prose_method.group(1)[:1].islower():
+                    continue
+                add_member(
+                    Member(
+                        name=name,
+                        kind="method",
+                        type_name=_prose_return_type(
+                            prose_method.group(3), current_name, known_names
+                        ),
+                        visibility="public",
+                        parameters=_parameters(prose_method.group(2)),
+                    )
+                )
+                continue
             field = _FIELD.match(stripped)
             if field:
-                members.append(
+                add_member(
                     Member(
                         name=field.group(2),
                         kind="field",
@@ -179,6 +329,23 @@ class UmlExtractor:
                         visibility=_VISIBILITY[field.group(1)],
                     )
                 )
+                continue
+            prose_field = _PROSE_FIELD.match(stripped)
+            if prose_field:
+                type_name = _prose_field_type(
+                    prose_field.group(3),
+                    bool(prose_field.group(2)),
+                    known_names,
+                )
+                if type_name is not None:
+                    add_member(
+                        Member(
+                            name=prose_field.group(1),
+                            kind="field",
+                            type_name=type_name,
+                            visibility="private",
+                        )
+                    )
 
         finish_unit()
         requirements = self._requirements(lines, units, evidence)

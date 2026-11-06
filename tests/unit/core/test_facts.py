@@ -58,6 +58,101 @@ class ExtractionTests(unittest.TestCase):
 
         self.assertEqual([1.25, 0.9, 11.0], factors(spec))
 
+    def test_acrescimo_and_desconto_become_scoped_factors(self) -> None:
+        spec = spec_with(
+            (unit("Conta"), unit("Especial")),
+            (
+                requirement(
+                    "Retorna saldo com desconto de 10% para impostos.", "Conta"
+                ),
+                requirement(
+                    "A: acréscimo de 30%. B: acréscimo de 10%. "
+                    "Aplicar desconto de 10% de impostos.",
+                    "Especial",
+                ),
+            ),
+        )
+
+        rules = [
+            (rule.unit, rule.value) for rule in extract_rules(spec) if rule.kind == "factor"
+        ]
+
+        self.assertEqual(
+            [
+                ("Conta", 0.9),
+                ("Especial", 1.3),
+                ("Especial", 1.1),
+                ("Especial", 0.9),
+            ],
+            rules,
+        )
+        matchers = JavaMatchers()
+        special = spec.units[1]
+        self.assertEqual(
+            (),
+            issues(
+                extract_rules(spec),
+                special,
+                "class Especial { Double calculaSaldo() { return 10.0 * 1.3 * 1.1 * 0.9; } }",
+                matchers,
+            ),
+        )
+        self.assertTrue(
+            issues(
+                extract_rules(spec),
+                special,
+                "class Especial { Double calculaSaldo() { return 10.0 * 1.3; } }",
+                matchers,
+            )
+        )
+
+    def test_prose_class_block_keeps_factor_inside_its_method(self) -> None:
+        auxiliar = Unit(
+            "Auxiliar",
+            "class",
+            (
+                Member("setor", "field", "String", "private"),
+                Member("calculaSalario", "method", "Double", "public"),
+            ),
+        )
+        text = (
+            "Construtor: Auxiliar(int registro, String setor, String nome, "
+            "Double salario)\n"
+            "  setor: “ACERVO” ou “LIMPEZA”.\n"
+            "  calculaSalario():\n"
+            "     ACERVO: acréscimo de 15%.\n"
+            "     LIMPEZA: acréscimo de 5%.\n"
+            "     Aplicar desconto de 10% de impostos.\n"
+            "  organizarLivros(String): Recebe o gênero e retorna: "
+            '"Livros de [gênero] organizados no [setor]."'
+        )
+        spec = spec_with((auxiliar,), (requirement(text, "Auxiliar"),))
+
+        rules = [rule for rule in extract_rules(spec) if rule.kind == "factor"]
+
+        self.assertEqual([1.15, 1.05, 0.9], [rule.value for rule in rules])
+        self.assertTrue(all(rule.text.startswith("calculaSalario") for rule in rules))
+        matchers = JavaMatchers()
+        self.assertEqual(
+            (),
+            issues(
+                rules,
+                auxiliar,
+                "class Auxiliar { Double calculaSalario() { "
+                "return getSalario() * 1.15 * 1.05 * 0.9; } }",
+                matchers,
+            ),
+        )
+        self.assertTrue(
+            issues(
+                rules,
+                auxiliar,
+                "class Auxiliar { Double calculaSalario() { "
+                "return getSalario() * 1.15; } }",
+                matchers,
+            )
+        )
+
     def test_reduction_by_a_quarter_keeps_three_quarters(self) -> None:
         spec = spec_with((unit("Item"),), (requirement("A reserva e reduzida em um quarto."),))
 
@@ -461,6 +556,40 @@ class ExtractionTests(unittest.TestCase):
             )
         )
 
+    def test_factor_already_applied_by_super_is_not_required_again(self) -> None:
+        base = Unit(
+            "Base",
+            "class",
+            (
+                Member("valor", "field", "double", "private"),
+                Member("total", "method", "double", "public"),
+            ),
+        )
+        child = Unit(
+            "Conta",
+            "class",
+            (Member("total", "method", "double", "public"),),
+        )
+        spec = spec_with(
+            (base, child),
+            (
+                requirement("total(): aplica desconto de 10%.", "Base"),
+                requirement(
+                    "total(): acréscimo de 50% e desconto de 10%.", "Conta"
+                ),
+            ),
+            relationships=(Relationship("Base", "Conta", "inheritance", 0.98),),
+        )
+        rules = extract_rules(spec)
+        matchers = JavaMatchers()
+        source = "public double total() { return super.total() * 1.5; }"
+
+        self.assertEqual((), issues(rules, child, source, matchers, base))
+        self.assertTrue(issues(rules, child, source, matchers))
+        self.assertTrue(
+            issues(rules, child, "return getValor() * 1.5;", matchers, base)
+        )
+
     def test_global_requirement_about_method_allows_new_effect(self) -> None:
         spec = spec_with(
             (unit("Base", "total"), unit("Conta", "total")),
@@ -498,6 +627,50 @@ class ExtractionTests(unittest.TestCase):
             text.index("Regra da Conta"),
             text.index("Regra geral"),
         )
+
+    def test_requirements_section_names_owners_of_cited_methods(self) -> None:
+        biblioteca = Unit(
+            "Biblioteca",
+            "class",
+            (
+                Member(
+                    "executaTarefa",
+                    "method",
+                    "String",
+                    "public",
+                    (("funcionario", "Funcionario"), ("texto", "String")),
+                ),
+            ),
+        )
+        bibliotecario = Unit(
+            "Bibliotecario",
+            "class",
+            (
+                Member(
+                    "processarEmprestimo",
+                    "method",
+                    "String",
+                    "public",
+                    (("texto", "String"),),
+                ),
+            ),
+        )
+        spec = spec_with(
+            (biblioteca, bibliotecario),
+            (
+                requirement(
+                    "executaTarefa retorna processarEmprestimo(String) para um "
+                    "Bibliotecario.",
+                    "Biblioteca",
+                ),
+            ),
+        )
+
+        text = requirements_section(spec, biblioteca)
+
+        self.assertIn("processarEmprestimo(String) -> Bibliotecario", text)
+        self.assertIn("Use exatamente estes nomes, sem renomear: processarEmprestimo.", text)
+        self.assertIn("((Subclasse) objeto).metodo(texto)", text)
 
     def test_prompt_section_uses_only_requirement_text(self) -> None:
         spec = spec_with(

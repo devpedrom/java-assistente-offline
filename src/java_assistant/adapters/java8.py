@@ -18,7 +18,52 @@ _PUBLIC_TYPE = re.compile(
     r"\bpublic\s+(?:abstract\s+|final\s+)?(class|interface|enum)\s+"
     r"([A-Za-z_$][A-Za-z0-9_$]*)"
 )
+_TYPE_DECL = re.compile(
+    r"(?m)^\s*(?:public\s+|abstract\s+|final\s+)*"
+    r"(?:class|interface|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+)
 _DIAGNOSTIC = re.compile(r"(?m)([^:\n]+\.java):\d+:\s*error")
+_LEXICAL_NOISE = re.compile(
+    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'",
+    re.DOTALL,
+)
+_CLOSERS = {")": "(", "]": "[", "}": "{"}
+_PRIVATE_ACCESS = re.compile(r"(\w+) has private access in (\w+)")
+
+
+_ECHO_MARKERS = (
+    "VERIFICAÇÃO GERAL:",
+    "PEDIDO ORIGINAL:",
+    "REQUISITOS APLICÁVEIS:",
+    "DECLARAÇÕES JAVA OBRIGATÓRIAS",
+)
+
+
+def _delimiter_issue(source: str) -> str:
+    """Catch a truncated or unbalanced reply before javac reports it."""
+    stack: list[str] = []
+    for character in _LEXICAL_NOISE.sub("", source):
+        if character in "([{":
+            stack.append(character)
+        elif character in ")]}":
+            if not stack or stack[-1] != _CLOSERS[character]:
+                return (
+                    "O código tem um fechamento fora de ordem "
+                    f"('{character}'); revise chaves, parênteses e colchetes."
+                )
+            stack.pop()
+    if stack:
+        pending = ", ".join(
+            f"{stack.count(opening)} '{opening}'"
+            for opening in "([{"
+            if stack.count(opening)
+        )
+        return (
+            "O código ficou incompleto: faltam fechamentos "
+            f"({pending} sem par). Entregue a classe inteira, com todos os "
+            "métodos e blocos fechados."
+        )
+    return ""
 
 _ACTION_PROTOCOL = """
 Responda SEMPRE com exatamente um dos blocos abaixo, sem crases e sem texto externo.
@@ -47,12 +92,32 @@ REGRAS CRÍTICAS PARA JAVA:
 _GENERAL_CHECK = (
     "VERIFICAÇÃO GERAL: aumento de X% = base * (1 + X/100); redução de X% = "
     "base * (1 - X/100). Não aplique duas vezes um efeito já calculado por super. "
+    "Se a classe tem requisito próprio para um método sobrescrito, calcule o método "
+    "completo a partir do atributo base e aplique TODOS os fatores do requisito, sem "
+    "delegar parte do cálculo a super.metodo(). Se não há requisito próprio, apenas "
+    "retorne super.metodo(). "
     "Se a classe herdar de uma superclasse sem construtor vazio, crie o construtor "
     "público mínimo que receba os dados herdados e próprios e chame super corretamente. "
     "Se o enunciado proibir ultrapassar um limite, valide e lance "
     "IllegalArgumentException em vez de ignorar o excesso. "
     "Use exatamente o atributo que o requisito cita; não o substitua por outro "
-    "parecido só porque também é numérico."
+    "parecido só porque também é numérico. "
+    "Construtores: copie a ordem EXATA dos tipos de parâmetros declarada, sem "
+    "reordenar nem agrupar por nome. "
+    "Quando o requisito manda receber um objeto e guardá-lo, atribua o próprio "
+    "parâmetro (vetor[posicao] = arg1); não o reconstrua a partir dos getters nem "
+    "chame uma sobrecarga com os campos separados. "
+    "Use cada método com a assinatura exata declarada e não crie método main nem "
+    "membros fora do contrato. "
+    "Em vetor de capacidade fixa, insira na primeira posição nula. Para remover, "
+    "desloque os elementos seguintes e anule a última posição: Java não tem "
+    "fatiamento como vetor[a:b]. Leia atributos private de outra classe apenas "
+    "pelos getters: escreva objeto.getNome(), nunca objeto.nome. Em instanceof use "
+    "as classes do contrato, nunca palavras do enunciado, e faça o cast para chamar "
+    "um método que só existe na subclasse: ((Subclasse) objeto).metodo(). Não troque "
+    "Double por double nem Integer por int quando o contrato declarar a classe "
+    "wrapper. Com Double use os operadores normais (*, +, -): não existe "
+    "Double.multiply, que é exclusivo de BigDecimal."
 )
 
 
@@ -252,8 +317,23 @@ class Java8Adapter:
                 f"Era esperada somente a declaração pública {unit.kind} {unit.name}, "
                 f"mas vieram: {found}"
             )
+        declarations = _TYPE_DECL.findall(candidate)
+        if declarations != [unit.name]:
+            found = ", ".join(declarations) or "nenhuma"
+            raise ValueError(
+                f"O arquivo deve declarar somente {unit.name}; vieram também: {found}"
+            )
         if "<write_file" in candidate or "<compile_java" in candidate:
             raise ValueError("A resposta misturou ações com o código Java.")
+        echoed = [marker for marker in _ECHO_MARKERS if marker in candidate]
+        if echoed:
+            raise ValueError(
+                "A resposta repetiu o prompt em vez de entregar só o código "
+                f"({echoed[0]}); retorne somente a classe Java."
+            )
+        issue = _delimiter_issue(candidate)
+        if issue:
+            raise ValueError(issue)
         return candidate.rstrip() + "\n"
 
     def structural_issues(
@@ -281,6 +361,31 @@ class Java8Adapter:
                 "Confira nomes de classes, campos e métodos e a ordem de geração das "
                 "unidades; nenhum símbolo novo pode ser inventado."
             )
+        if "symbol:   method" in normalized or "symbol: method" in normalized:
+            hints.append(
+                "O tipo antes do ponto não declara esse método: chame o método na "
+                "classe que realmente o possui, depois de converter o objeto para "
+                "ela, e não repita o método que está sendo escrito."
+            )
+        if "']' expected" in normalized or "not a statement" in normalized:
+            hints.append(
+                "Java não tem fatiamento de vetores (vetor[0:n]). Para excluir um item, "
+                "percorra o vetor, desloque cada elemento seguinte uma posição para a "
+                "esquerda e defina a última posição como null."
+            )
+        if "private access" in normalized:
+            hints.append(
+                "Atributos private de outra classe não podem ser lidos diretamente; "
+                "use o getter público correspondente."
+            )
+            access = _PRIVATE_ACCESS.search(diagnostics)
+            if access:
+                field, owner = access.group(1), access.group(2)
+                hints.append(
+                    f"Troque o acesso direto a {owner}.{field} por "
+                    f"objeto.get{field[:1].upper()}{field[1:]}() — por exemplo, "
+                    f"(({owner}) objeto).get{field[:1].upper()}{field[1:]}();"
+                )
         if "missing return" in normalized:
             hints.append("Todo caminho do método precisa retornar um valor do tipo declarado.")
         if "no suitable constructor found" in normalized or "is not applicable" in normalized:
@@ -288,6 +393,12 @@ class Java8Adapter:
                 "A superclasse não tem construtor com esses argumentos: chame um "
                 "construtor existente dela passando TODOS os parâmetros (veja o arquivo "
                 "da superclasse) e só depois atribua os campos próprios."
+            )
+        if "no suitable method found" in normalized:
+            hints.append(
+                "A chamada não corresponde a nenhuma assinatura declarada: use a "
+                "assinatura exata do contrato e, se o método recebe um objeto, passe "
+                "o próprio objeto recebido em vez dos campos dele."
             )
         if "verificação explícita do limite" in normalized:
             hints.append(

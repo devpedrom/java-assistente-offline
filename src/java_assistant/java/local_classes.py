@@ -11,7 +11,6 @@ solver can run them after compiling.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 import re
 import subprocess
@@ -145,10 +144,6 @@ def _mentions(text: str, name: str) -> bool:
     return bool(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE))
 
 
-def _member_key(member: Member) -> tuple[str, str, tuple[str, ...]]:
-    return (member.name, member.kind, tuple(kind for _, kind in member.parameters))
-
-
 class LocalClassAdopter:
     def __init__(
         self,
@@ -231,25 +226,12 @@ class LocalClassAdopter:
         by_name = {unit.name: unit for unit in spec.units}
         order = [unit.name for unit in spec.units]
         for local in units:
-            existing = by_name.get(local.name)
-            if existing is None:
-                by_name[local.name] = local
+            if local.name not in by_name:
                 order.append(local.name)
-                continue
-            members = list(existing.members)
-            positions = {_member_key(member): index for index, member in enumerate(members)}
-            for member in local.members:
-                key = _member_key(member)
-                if key in positions:
-                    members[positions[key]] = member
-                else:
-                    positions[key] = len(members)
-                    members.append(member)
-            by_name[local.name] = replace(
-                existing,
-                members=tuple(members),
-                confidence=max(existing.confidence, CONFIDENCE),
-            )
+            # The compiled class is the authoritative API: text-inferred members
+            # that it does not declare are parser noise (for example a method
+            # from a neighbouring class section) and must not reach generation.
+            by_name[local.name] = local
         merged_units = tuple(by_name[name] for name in order)
 
         replaced = {(item.child, item.kind) for item in relationships}
