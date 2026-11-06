@@ -1,9 +1,16 @@
 import unittest
 
 from tests.qualidade import medir
+from tests.qualidade.validator import accepted
 
 
 class FidelityMeterTests(unittest.TestCase):
+    def test_validator_requires_complete_pass_lines_not_words_inside_exception_message(self):
+        output = ("  ✔ caso aprovado\n" * 16) + "  ✔ OK: falha esperada corretamente recusada\n" + "═" * 60
+        self.assertTrue(accepted(output))
+        self.assertFalse(accepted("❌ caso incorreto\n" + output))
+        self.assertFalse(accepted(output.rsplit("\n", 1)[0]))
+
     def test_text_fixture_contract_matches_expected(self) -> None:
         result = medir.run("E1")
 

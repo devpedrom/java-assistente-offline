@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from decimal import Decimal
 import json
 from pathlib import Path
 import re
@@ -12,8 +13,11 @@ import unicodedata
 from .config import AppConfig
 from .criteria import build_context, ensure_criteria, load_criteria
 from .java.toolchain import JavaToolchain
+from .java.judge import Judge
 from .java.validator import ContractValidator
-from .memory.store import ProjectStore, pdf_sha256, project_identifier, text_sha256
+from .java.methods import locate_methods, extract_body, validate_method
+from .memory.project import ProjectMemory
+from .memory.store import pdf_sha256, text_sha256
 from .model.actions import Action, ActionValidationError, parse_action
 from .model.client import Message, ModelReply
 from .pdf.discovery import discover_pdfs
@@ -48,6 +52,21 @@ def _diagnostic_guidance(diagnostic: str) -> str:
     return "\n".join(guidance)
 
 
+def _failure_owner(failures: tuple[str, ...] | list[str], names: list[str]) -> str | None:
+    for failure in failures:
+        owner = failure.split(".", 1)[0]
+        if owner in names:
+            return owner
+    for failure in failures:
+        match = re.search(r"(?:Classe ausente: |Campo ausente ou divergente: |Método ausente ou divergente: |Herança ausente: )([\w$À-ÿ]+)", failure)
+        if match and match.group(1) in names:
+            return match.group(1)
+        match = re.search(r"([^:\n/\\]+)\.java:\d+:\s*error", failure)
+        if match and match.group(1) in names:
+            return match.group(1)
+    return None
+
+
 def _extract_java_source(text: str, class_name: str) -> str:
     candidate = text.strip()
     write_start = re.search(
@@ -78,27 +97,37 @@ def _extract_java_source(text: str, class_name: str) -> str:
     return candidate.rstrip() + "\n"
 
 
+def _required_generation_rules(requirements: str) -> tuple[str, ...]:
+    normalized = _fold_text(requirements)
+    rules: list[str] = []
+    for match in re.finditer(
+        r"\b(aumenta|aumento|reduzid[ao]|reducao)\s+(?:em|de)\s+(\d+(?:[.,]\d+)?)\s*%",
+        normalized,
+    ):
+        kind, percentage = match.groups()
+        fraction = Decimal(percentage.replace(",", ".")) / 100
+        factor = 1 + fraction if kind.startswith("aument") else 1 - fraction
+        literal = format(factor, ".1f") if factor == factor.to_integral_value() else str(factor)
+        rules.append(f"{match.group(0)}: resultado = base * {literal}")
+    for pattern, factor in (
+        (r"\b(?:reduzid[ao]|reducao)\s+(?:pela|a)\s+metade\b", "0.5"),
+        (r"\b(?:reduzid[ao]|reducao)\s+em\s+um\s+quarto\b", "0.75"),
+    ):
+        if re.search(pattern, normalized):
+            rules.append(f"redução fracionária: resultado = base * {factor}")
+    if re.search(r"nunca[^.\n]*maior\s+que", normalized):
+        rules.append(
+            "invariante 'nunca pode ser maior': valide explicitamente no construtor "
+            "e lance IllegalArgumentException se o valor exceder o limite"
+        )
+    return tuple(dict.fromkeys(rules))
+
+
 def _semantic_issues(requirements: str, source: str) -> tuple[str, ...]:
-    normalized = requirements.casefold()
+    normalized = _fold_text(requirements)
     compact_source = source.casefold()
     issues: list[str] = []
 
-    if "aumenta em 100%" in normalized and not re.search(
-        r"(?:\*|\*=)\s*2(?:\.0+)?\b", compact_source
-    ):
-        issues.append("Aumento de 100% precisa resultar em base * 2.0.")
-    if "aumenta em 50%" in normalized and not re.search(
-        r"(?:\*|\*=)\s*1\.5\b", compact_source
-    ):
-        issues.append("Aumento de 50% precisa resultar em base * 1.5.")
-    if re.search(r"reduzid[ao]\s+em\s+um\s+quarto", normalized) and not re.search(
-        r"(?:\*|\*=)\s*0\.75\b", compact_source
-    ):
-        issues.append("Reduzir em um quarto mantém 75%: use base * 0.75.")
-    if "reduzida pela metade" in normalized and not re.search(
-        r"(?:\*|\*=)\s*0\.5\b", compact_source
-    ):
-        issues.append("Redução pela metade precisa resultar em base * 0.5.")
     if re.search(r"nunca[^.\n]*maior\s+que", normalized):
         has_upper_bound_guard = ">" in compact_source and any(
             marker in compact_source
@@ -110,27 +139,6 @@ def _semantic_issues(requirements: str, source: str) -> tuple[str, ...]:
                 "por exemplo lançando IllegalArgumentException quando o valor exceder a capacidade."
             )
 
-    specific = re.search(
-        r"REGRAS ESPECÍFICAS DO PDF:\n(.*?)(?:\nVERIFICAÇÃO GERAL:|\Z)",
-        requirements,
-        flags=re.DOTALL | re.IGNORECASE,
-    )
-    specific_text = specific.group(1).casefold() if specific else normalized
-    autonomia = re.search(
-        r"autonomia\s*\([^)]*\)\s*\{(.*?)(?:\n\s*(?:public|protected|private)\s|\Z)",
-        compact_source,
-        flags=re.DOTALL,
-    )
-    if (
-        "autonomia" not in specific_text
-        and autonomia
-        and "super.autonomia()" in autonomia.group(1)
-        and "*" in autonomia.group(1)
-    ):
-        issues.append(
-            "O PDF não define nova alteração de autonomia nesta classe; retorne somente "
-            "super.autonomia() para não repetir o efeito da superclasse."
-        )
     return tuple(issues)
 
 
@@ -148,7 +156,7 @@ public class Classe {
 }
 </write_file>
 Para compilar: <compile_java />
-Para executar: <run_java main_class="Frota" />
+Para executar: <run_java main_class="Main" />
 Para encerrar: <respond>mensagem final em português</respond>
 Para read_file, apply_patch e memory, o formato JSON anterior continua aceito.
 Nunca use shell. Use exatamente uma ferramenta por resposta.
@@ -180,7 +188,6 @@ class AssistantSession:
         self.pdf_extractor = pdf_extractor
         self.toolchain = toolchain
         self.workspace = Workspace(config.project_root)
-        self.history = History(self.workspace)
         self.evidence = EvidenceReport()
         self._criteria_path = ensure_criteria(config, criteria_template)
         self._pdf_choices: list[Path] = []
@@ -188,14 +195,58 @@ class AssistantSession:
         self._awaiting_enunciado = False
         self._enunciado_lines: list[str] = []
         self._contract: JavaContract | None = None
+        self._enunciado_invalid = False
         self._pdf_text = ""
         self._ambiguities: list[int] = []
-        self._store = ProjectStore.open(
-            "sem-pdf", project_identifier(config.project_root), config.state_dir
-        )
+        self._closed = False
+        self.memory = ProjectMemory.open(config.project_root, config.state_dir)
+        self._store = self.memory
+        self.resume_message = "Novo projeto iniciado nesta pasta. Use /pdf ou /enunciado."
+        try:
+            self.history = History(self.workspace, recovery=self.memory.files)
+            self.memory.import_legacy(self.memory.manifest.pdf_hash)
+            requirements = self.memory.requirements
+            if requirements:
+                valid = requirements.identity == self.memory.manifest.pdf_hash
+                warning = "Memória de requisitos inconsistente; selecione o enunciado novamente."
+                pdf_path = self.memory.manifest.pdf_path
+                if pdf_path:
+                    try:
+                        path = self.workspace._resolve(Path(pdf_path))
+                        valid = valid and pdf_sha256(path) == self.memory.manifest.pdf_hash
+                    except OSError:
+                        valid = False
+                    warning = "PDF mudou ou ficou indisponível; use /pdf para reler."
+                if valid:
+                    self._contract = requirements.contract if requirements.contract.classes else None
+                    self._enunciado_invalid = not requirements.contract.classes
+                    self._pdf_text = requirements.text[:12_000]
+                    self._ambiguities = [index for index, item in enumerate(requirements.contract.relationships)
+                                         if item.confidence < .9 and item.alternatives]
+                    self.memory.update_criteria(load_criteria(config))
+                    snapshot = self.memory.load_verifications()
+                    self.evidence.confirmed_pdf.append(f"Enunciado retomado: {pdf_path or 'texto colado'}")
+                    self.evidence.inferred_uml.extend(f"Classe {item.name}" for item in requirements.contract.classes)
+                    if self.memory.has_valid_compilation():
+                        self.evidence.compiled.extend(snapshot.source_hashes)
+                        self.evidence.locally_tested.extend(snapshot.locally_tested)
+                    self.evidence.unproven.extend(snapshot.unproven)
+                    self.resume_message = "Projeto retomado. " + self.memory.next_action() + "\n" + self._render_contract()
+                else:
+                    self._enunciado_invalid = True
+                    self.memory.invalidate(warning)
+                    self.resume_message = "Projeto retomado. " + warning
+        except BaseException:
+            self.memory.close()
+            raise
 
     def close(self) -> None:
-        self._store.close()
+        if not self._closed:
+            try:
+                self._store.close()
+            finally:
+                self.toolchain.close()
+                self._closed = True
 
     def _contract_text(self) -> str:
         if self._contract is None:
@@ -203,6 +254,38 @@ class AssistantSession:
         return json.dumps(
             asdict(self._contract), ensure_ascii=False, separators=(",", ":")
         )
+
+    def _render_contract(self) -> str:
+        if self._contract is None:
+            return "Nenhum contrato carregado. Use /enunciado ou /pdf."
+        lines = ["Contrato interpretado do enunciado (não é validação do código):"]
+        for java_class in self._contract.classes:
+            parents = [
+                item.parent for item in self._contract.relationships
+                if item.child == java_class.name and item.kind == "inheritance"
+            ]
+            header = java_class.name
+            if parents:
+                header += " extends " + ", ".join(parents)
+            lines.append(header)
+            for field in java_class.fields:
+                lines.append(f"  {field.visibility} {field.name}: {field.type_name}")
+            for method in java_class.methods:
+                parameters = ", ".join(f"{name}: {kind}" for name, kind in method.parameters)
+                signature = f"  {method.visibility} {method.name}({parameters})"
+                if method.name != java_class.name:
+                    signature += f": {method.type_name}"
+                lines.append(signature)
+        for item in self._contract.relationships:
+            lines.append(
+                f"Relacionamento: {item.parent} → {item.child}: {item.kind} "
+                f"(confiança {item.confidence:.0%})"
+            )
+        lines.append("Incertezas:")
+        lines.extend(f"- {warning}" for warning in self._contract.warnings)
+        if not self._contract.warnings:
+            lines.append("- Nenhuma sinalizada pelo extrator; interpretação ainda sujeita a revisão.")
+        return "\n".join(lines)
 
     def _relevant_files(self) -> dict[str, str]:
         selected: dict[str, str] = {}
@@ -333,17 +416,23 @@ class AssistantSession:
         lines = self._pdf_text.splitlines()
         class_names = {_fold_text(item) for item in self._required_java_names()}
         target = _fold_text(name)
+        def heading(line):
+            match = re.fullmatch(
+                r"(?:#{1,6}\s*)?(?:(?:class|classe)\s*:?\s*)?([\w$À-ÿ]+)(?:\s*:\s*(?:\(.*\))?)?",
+                line.strip(), flags=re.I,
+            )
+            return _fold_text(match.group(1)) if match else ""
         starts = [
             index
             for index, line in enumerate(lines)
-            if _fold_text(line.strip().rstrip(":")) == target
+            if heading(line) == target
         ]
         if starts:
             start = starts[-1]
             end = len(lines)
             for index in range(start + 1, len(lines)):
-                heading = _fold_text(lines[index].strip().rstrip(":"))
-                if heading in class_names or heading.startswith("instrucao final"):
+                next_heading = heading(lines[index])
+                if next_heading in class_names or _fold_text(lines[index].strip()).startswith("instrucao final"):
                     end = index
                     break
             focused_rules = "\n".join(lines[start:end]).strip()
@@ -366,31 +455,13 @@ class AssistantSession:
             focused_rules = self._pdf_text
             parts.append("TEXTO DO PDF PARA ESTA CLASSE:\n" + focused_rules)
 
-        arithmetic: list[str] = []
-        normalized_rules = focused_rules.casefold()
-        if "aumenta em 100%" in normalized_rules:
-            arithmetic.append("aumento de 100%: resultado = base * 2.0")
-        if "aumenta em 50%" in normalized_rules:
-            arithmetic.append("aumento de 50%: resultado = base * 1.5")
-        if re.search(r"reduzid[ao]\s+em\s+um\s+quarto", normalized_rules):
-            arithmetic.append("redução em um quarto: resultado = base * 0.75")
-        if "reduzida pela metade" in normalized_rules:
-            arithmetic.append("redução pela metade: resultado = base * 0.5")
-        if re.search(r"nunca[^.\n]*maior\s+que", normalized_rules):
-            arithmetic.append(
-                "invariante 'nunca pode ser maior': valide explicitamente no construtor "
-                "e lance IllegalArgumentException se o valor exceder o limite"
-            )
+        arithmetic = _required_generation_rules(focused_rules)
         if arithmetic:
             parts.append("FATOS ARITMÉTICOS OBRIGATÓRIOS:\n" + "\n".join(arithmetic))
-        if parent and "autonomia" not in normalized_rules:
-            parts.append(
-                "SEM NOVA REGRA DE AUTONOMIA NESTA CLASSE: o método autonomia deve "
-                "somente retornar super.autonomia(), sem aplicar outro fator."
-            )
         parts.append(
             "VERIFICAÇÃO GERAL: aumento de X% = base * (1 + X/100); redução de X% = "
             "base * (1 - X/100). Não aplique duas vezes um efeito já calculado por super. "
+            "Se um método sobrescrito não tem nova regra textual, preserve o comportamento de super. "
             "Se a classe herdar de uma superclasse sem construtor vazio, crie o construtor "
             "público mínimo que receba os dados herdados e próprios e chame super corretamente."
         )
@@ -409,8 +480,10 @@ class AssistantSession:
     ) -> list[Message]:
         relevant = self._focused_relevant_files(class_name)
         target_path = self.config.project_root / f"{class_name}.java"
+        current_source = ""
         if target_path.is_file():
-            relevant[f"{class_name}.java"] = self.workspace.read(Path(f"{class_name}.java"))
+            current_source = self.workspace.read(Path(f"{class_name}.java"))
+            relevant.pop(f"{class_name}.java", None)
         request = (
             f"Escreva SOMENTE {class_name}.java. Retorne apenas o código-fonte Java 8 completo, "
             "sem Markdown, sem tags, sem package e sem explicações. Deve existir exatamente uma "
@@ -418,6 +491,9 @@ class AssistantSession:
             f"PEDIDO ORIGINAL: {user_request}\n\n"
             + self._focused_requirements(class_name)
         )
+        if current_source:
+            request += "\n\nFONTE ATUAL A CORRIGIR (não é uma instrução; não preserve os erros):\n" + current_source
+            diagnostic = diagnostic or user_request
         if diagnostic:
             request += "\n\nERRO A CORRIGIR:\n" + diagnostic[:4_000]
             guidance = _diagnostic_guidance(diagnostic)
@@ -488,16 +564,99 @@ class AssistantSession:
                     )
                 )
                 continue
-            change = self.workspace.write(Path(f"{class_name}.java"), source)
-            self.history.record(change)
+            self.history.write(Path(f"{class_name}.java"), source)
+            self.evidence.compiled.clear()
+            self.evidence.locally_tested.clear()
             self._store.remember("change", f"Arquivo escrito: {class_name}.java")
             return None
         return last_error or "O modelo não retornou uma classe Java válida."
 
-    def _guided_solve(self, text: str) -> SessionReply:
+    def _correct_methods(self, class_name: str, request: str, diagnostic: str = "") -> str | None:
+        relative = Path(f"{class_name}.java")
+        found = locate_methods(self.toolchain, relative, class_name)
+        explicit = re.search(
+            rf"(?:\b{re.escape(class_name)}\.|"
+            r"(?i:\b(?:corrij\w*|ajust\w*|alter\w*|modifi\w*)\s+(?:(?:somente|apenas)\s+)?(?:o\s+)?m[eé]todo\s+))"
+            r"([\w$]+)(?:\s*\(([^)]*)\))?",
+            request,
+        )
+        if not explicit:
+            explicit = re.search(
+                rf"(?i:\b(?:somente|apenas)\s+(?:o\s+)?)([\w$]+)(?:\s*\(([^)]*)\))?"
+                rf"(?i:\s+(?:de|da)\s+){re.escape(class_name)}\b", request)
+        selected = list(found)
+        if explicit:
+            selected = [item for item in found if item.name == explicit.group(1)]
+            if explicit.group(2) is not None:
+                types = tuple(part.strip() for part in explicit.group(2).split(",") if part.strip())
+                selected = [item for item in selected if item.parameter_types == types]
+            if len(selected) != 1:
+                return "Identifique a sobrecarga pela assinatura: " + "; ".join(item.signature for item in found)
+        elif re.search(r"\b(?:somente|apenas|s[oó])\b", request, re.I) and not re.search(
+                rf"(?i:\b(?:somente|apenas|s[oó])\s+(?:a\s+classe\s+)?){re.escape(class_name)}\b", request):
+            return f"Identifique o método restrito como {class_name}.metodo(tipos). Nenhum corpo foi alterado."
+        if not selected:
+            return "Nenhum corpo de método disponível; construtores e assinaturas foram preservados."
+        identities = [(item.name, item.parameter_types) for item in selected]
+        for name, types in identities:
+            source = self.workspace.read(relative)
+            current = locate_methods(self.toolchain, relative, class_name)
+            method = next(item for item in current if (item.name, item.parameter_types) == (name, types))
+            structure = source
+            for item in reversed(current):
+                structure = structure[:item.start] + "{ /* corpo omitido */ }" + structure[item.end:]
+            relevant = self._focused_relevant_files(class_name)
+            relevant.pop(str(relative), None)
+            prompt = (
+                f"Corrija somente o corpo do método de {class_name} com assinatura {method.signature}. "
+                "Retorne somente o bloco Java entre { e }, sem assinatura, classe, Markdown ou explicações. "
+                "Não altere atributos, construtores ou outros métodos.\n\n"
+                + self._focused_requirements(class_name)
+                + "\n\nESTRUTURA ATUAL (corpos omitidos):\n" + structure
+                + "\n\nCORPO ATUAL COM ERRO:\n" + source[method.start:method.end]
+                + "\n\nPEDIDO DE CORREÇÃO:\n" + request
+                + "\n\nDIAGNÓSTICO:\n" + (diagnostic or request)[:4000]
+                + f"\n\nNESTA CHAMADA: somente {method.signature}. "
+                "Retorne somente o corpo entre { e }, sem assinatura ou outros métodos."
+            )
+            messages = build_context(criteria=load_criteria(self.config), contract="", source_text="",
+                memory_summary="", relevant_files=relevant, user_request=prompt)
+            messages[0] = Message("system", messages[0].content
+                + "\n\nMODO: CORREÇÃO DE UM CORPO. Responda somente com um bloco Java que começa com { e termina com }. "
+                "Não retorne assinaturas, classes, Markdown nem outros métodos. O pedido completo serve de contexto; "
+                f"nesta chamada altere somente o corpo de {method.signature} na classe {class_name}.")
+            last_error = ""
+            for _attempt in range(2):
+                reply = self.model.complete(messages, max_tokens=500)
+                try:
+                    if reply.truncated:
+                        raise ValueError("Resposta cortada; retorne somente o corpo completo.")
+                    body = extract_body(reply.content)
+                    candidate = validate_method(self.workspace, self.toolchain, self._contract,
+                                                relative, method, body, source)
+                    if candidate != source:
+                        self.history.write(relative, candidate, expected=source)
+                        self.evidence.compiled.clear()
+                        self.evidence.locally_tested.clear()
+                        self._store.remember("change", f"Corpo corrigido: {class_name}.{name}({', '.join(types)})")
+                    break
+                except PatchMismatchError:
+                    raise
+                except ValueError as error:
+                    last_error = str(error)
+                    messages.append(Message("assistant", reply.content[:2000]))
+                    messages.append(Message("user", last_error + " Retorne somente o corpo Java corrigido."))
+            else:
+                return last_error
+        return None
+
+    def _guided_solve(self, text: str, target: str | None = None) -> SessionReply:
         created: list[str] = []
-        for class_name in self._missing_java_names():
-            error = self._generate_one_class(class_name, text)
+        for class_name in ([target] if target else self._missing_java_names()):
+            if target and (self.config.project_root / f"{class_name}.java").is_file():
+                error = self._correct_methods(class_name, text)
+            else:
+                error = self._generate_one_class(class_name, text)
             if error:
                 return SessionReply(
                     f"Parei ao gerar {class_name}.java: {error} Os arquivos anteriores foram preservados."
@@ -509,23 +668,26 @@ class AssistantSession:
             for path in self.config.project_root.rglob("*.java")
         ]
         compilation = self.toolchain.compile(sources)
+        self.memory.record_verification(compilation.success, diagnostics=compilation.diagnostics)
         repairs = 0
         while not compilation.success and repairs < 2:
             match = re.search(r"(?m)([^:\n]+\.java):\d+:\s*error", compilation.diagnostics)
             if not match:
                 break
             class_name = Path(match.group(1)).stem
+            if target and class_name != target:
+                break
             if not (self.config.project_root / f"{class_name}.java").is_file():
                 break
-            error = self._generate_one_class(
-                class_name,
-                text,
-                diagnostic=compilation.diagnostics,
-            )
+            if target:
+                error = self._correct_methods(class_name, text, compilation.diagnostics)
+            else:
+                error = self._generate_one_class(class_name, text, diagnostic=compilation.diagnostics)
             if error:
                 break
             repairs += 1
             compilation = self.toolchain.compile(sources)
+            self.memory.record_verification(compilation.success, diagnostics=compilation.diagnostics)
 
         if not compilation.success:
             self._store.remember("compile", f"Falha: {compilation.diagnostics[:1000]}")
@@ -540,17 +702,15 @@ class AssistantSession:
             structural_repairs = 0
             repair_limit = max(2, len(self._contract.classes))
             while not validation.valid and structural_repairs < repair_limit:
+                self.memory.record_verification(validation.compilation.success, diagnostics="\n".join(validation.issues))
                 diagnostic = "\n".join(validation.issues)
-                class_name = next(
-                    (
-                        item.name
-                        for item in self._contract.classes
-                        if item.name in diagnostic
-                    ),
-                    None,
-                )
+                class_name = _failure_owner(validation.issues, [item.name for item in self._contract.classes])
                 if class_name is None:
                     break
+                if target and class_name != target:
+                    break
+                if target:
+                    break  # Body-only corrections cannot repair missing members or signatures.
                 error = self._generate_one_class(
                     class_name,
                     text,
@@ -563,6 +723,7 @@ class AssistantSession:
             if not validation.valid:
                 issues = "\n".join(validation.issues)
                 self._store.remember("validation", f"Falha: {issues[:1000]}")
+                self.memory.record_verification(validation.compilation.success, diagnostics=issues)
                 return SessionReply(
                     "As classes compilam, mas ainda divergem do UML após correções automáticas:\n"
                     + issues
@@ -572,12 +733,42 @@ class AssistantSession:
         names = ", ".join(str(item) for item in sources)
         self.evidence.compiled.append(names)
         self._store.remember("compile", f"Sucesso: {names}")
+        if self._contract is not None:
+            judge = Judge(self.toolchain, self.model)
+            cases = judge.build_cases(self._contract, self._pdf_text)
+            report = judge.run(cases)
+            for _attempt in range(2):
+                if not report.failed:
+                    break
+                diagnostic = "\n".join(report.failed)
+                class_name = _failure_owner(report.failed, [item.name for item in self._contract.classes])
+                if class_name is None or (target and class_name != target):
+                    break
+                if self._correct_methods(class_name, text, diagnostic=diagnostic):
+                    break
+                report = judge.run(cases)
+            self.evidence.locally_tested = list(report.passed)
+            self.evidence.unproven = list(report.unverified)
+            self._store.remember("judge", json.dumps(asdict(report), ensure_ascii=False))
+            if report.failed:
+                self.evidence.unproven.extend(report.failed)
+                final_validation = ContractValidator(self.toolchain).validate(self._contract, self.config.project_root)
+                self.memory.record_verification(final_validation.compilation.success, structural=final_validation.valid,
+                    locally_tested=report.passed, unproven=self.evidence.unproven, diagnostics="\n".join(report.failed))
+                self.evidence.compiled = [names] if final_validation.compilation.success else []
+                return SessionReply(
+                    "As verificações locais ainda falharam após tentativas limitadas:\n"
+                    + "\n".join(report.failed + report.unverified)
+                )
+        self.evidence.compiled = [names]
+        self.memory.record_verification(True, structural=self._contract is not None,
+            locally_tested=self.evidence.locally_tested, unproven=self.evidence.unproven,
+            diagnostics="Compilação Java 8 e verificações locais registradas; cobertura completa não comprovada.")
         main_class = self._main_class_name()
         run_summary = ""
         if main_class:
             execution = self.toolchain.run(main_class, 15)
             if execution.success:
-                self.evidence.locally_tested.append(f"{main_class}: execução concluída")
                 run_summary = f" e {main_class} foi executada"
             else:
                 return SessionReply(
@@ -586,7 +777,9 @@ class AssistantSession:
                 )
         created_text = ", ".join(created) if created else "arquivos existentes"
         return SessionReply(
-            f"Solução concluída: {created_text}; compilação Java 8 aprovada{run_summary}."
+            f"Arquivos preparados: {created_text}; compilação Java 8 aprovada{run_summary}.\n"
+            f"Casos locais inferidos aprovados: {len(self.evidence.locally_tested)}. "
+            "Cobertura completa e avaliação dos jurados não comprovadas."
         )
 
     def _list_pdfs(self) -> SessionReply:
@@ -618,25 +811,29 @@ class AssistantSession:
         if not raw.strip():
             return SessionReply("Nenhum texto recebido. Use /enunciado novamente.")
         evidence = PdfEvidence(text=raw, source="texto colado", warnings=())
-        return self._apply_evidence(evidence, text_sha256(raw), "texto colado")
+        return self._apply_evidence(evidence, "texto-" + text_sha256(raw), "texto colado")
 
     def _apply_evidence(
         self, evidence: PdfEvidence, identity: str, label: str
     ) -> SessionReply:
         contract = UmlExtractor().extract(evidence)
+        self.memory.select_requirements(contract, evidence.text, evidence.source, identity,
+                                        label if label.lower().endswith(".pdf") else None,
+                                        load_criteria(self.config))
+        self.memory.import_legacy(identity)
+        self.evidence = EvidenceReport()
         if not contract.classes:
+            self._enunciado_invalid = True
             self._contract = None
             self._pdf_text = ""
+            self._ambiguities = []
             return SessionReply(
                 "Não reconheci nenhuma classe no enunciado. Envie o diagrama com as classes, "
                 "os atributos e os métodos, ou corrija o texto e use /enunciado novamente."
             )
         self._contract = contract
+        self._enunciado_invalid = False
         self._pdf_text = evidence.text[:12_000]
-        self._store.close()
-        self._store = ProjectStore.open(
-            identity, project_identifier(self.config.project_root), self.config.state_dir
-        )
         self._store.remember("pdf", f"Selecionado: {label}; fonte: {evidence.source}")
         self.evidence.confirmed_pdf.append(f"Enunciado: {label}")
         self.evidence.confirmed_pdf.append(f"Extração utilizada: {evidence.source}")
@@ -685,6 +882,9 @@ class AssistantSession:
         self._store.remember(
             "decision", f"{relationship.parent}-{relationship.child}: {selected}"
         )
+        self.memory.select_requirements(self._contract, self.memory.requirements.text,
+            self.memory.requirements.source, self.memory.requirements.identity,
+            self.memory.manifest.pdf_path, load_criteria(self.config))
         if self._ambiguities:
             return SessionReply(f"Interpretação registrada: {selected}.\n{self._ambiguity_question()}")
         return SessionReply(f"Interpretação registrada: {selected}. Agora posso gerar o código.")
@@ -697,24 +897,29 @@ class AssistantSession:
         return value
 
     def _execute_action(self, action: Action) -> str:
+        if action.tool in {"read_file", "write_file", "apply_patch"}:
+            relative = self.workspace._resolve(Path(self._text_arg(action, "path"))).relative_to(self.config.project_root)
+            if ".assistente" in relative.parts:
+                raise ValueError("A memória canônica é gerida somente pelo controlador.")
         if action.tool == "read_file":
             path = self._text_arg(action, "path")
             return self.workspace.read(Path(path))
         if action.tool == "write_file":
             path = self._text_arg(action, "path")
             content = self._text_arg(action, "content")
-            change = self.workspace.write(Path(path), content)
-            self.history.record(change)
+            self.history.write(Path(path), content)
+            self.evidence.compiled.clear()
+            self.evidence.locally_tested.clear()
             self._store.remember("change", f"Arquivo escrito: {path}")
             return f"Arquivo salvo: {path}"
         if action.tool == "apply_patch":
             path = self._text_arg(action, "path")
-            change = self.workspace.apply_patch(
-                Path(path),
-                self._text_arg(action, "expected"),
-                self._text_arg(action, "replacement"),
-            )
-            self.history.record(change)
+            expected = self._text_arg(action, "expected")
+            if self.workspace.read(Path(path)) != expected:
+                raise PatchMismatchError("O arquivo mudou ou o trecho esperado não corresponde exatamente.")
+            self.history.write(Path(path), self._text_arg(action, "replacement"))
+            self.evidence.compiled.clear()
+            self.evidence.locally_tested.clear()
             self._store.remember("change", f"Arquivo ajustado: {path}")
             return f"Arquivo ajustado: {path}"
         if action.tool == "compile_java":
@@ -726,6 +931,7 @@ class AssistantSession:
             else:
                 raise ValueError("sources precisa ser uma lista de caminhos.")
             result = self.toolchain.compile(sources)
+            self.memory.record_verification(result.success, diagnostics=result.diagnostics, sources=sources)
             if result.success:
                 names = ", ".join(str(item) for item in sources)
                 if names not in self.evidence.compiled:
@@ -754,6 +960,20 @@ class AssistantSession:
         raise ValueError("Ação não implementada.")
 
     def _chat(self, text: str) -> SessionReply:
+        if self._enunciado_invalid:
+            return SessionReply("Enunciado sem contrato válido. Use /pdf para reler ou /enunciado para informar o diagrama.")
+        if self._contract is not None and not self._contract.classes:
+            return SessionReply(
+                "\n".join(self._contract.warnings)
+                + "\nEnvie o diagrama com as classes antes de gerar código."
+            )
+        if self._contract is not None and re.search(r"\b(?:corrij\w*|ajust\w*|alter\w*|modifi\w*)", text, re.I):
+            targets = [item.name for item in self._contract.classes
+                       if re.search(rf"(?<!\w){re.escape(item.name)}(?!\w)", text, re.I)]
+            if len(targets) == 1:
+                return self._guided_solve(text, target=targets[0])
+            if targets:
+                return SessionReply("Indique uma classe por pedido de correção para preservar as demais.")
         initial_missing = self._missing_java_names()
         if self._contract is not None and self._wants_generation(text):
             return self._guided_solve(text)
@@ -852,6 +1072,25 @@ class AssistantSession:
 
     def handle(self, text: str) -> SessionReply:
         try:
+            changes = self.memory.reconcile_sources()
+            criteria_changed = self.memory.update_criteria(load_criteria(self.config))
+            pdf_path = self.memory.manifest.pdf_path
+            if pdf_path and not self._enunciado_invalid:
+                try:
+                    pdf_changed = pdf_sha256(self.workspace._resolve(Path(pdf_path))) != self.memory.manifest.pdf_hash
+                except OSError:
+                    pdf_changed = True
+                if pdf_changed:
+                    reason = "PDF mudou ou ficou indisponível; use /pdf para reler."
+                    self.memory.invalidate(reason)
+                    self._contract = None
+                    self._pdf_text = ""
+                    self._ambiguities = []
+                    self._enunciado_invalid = True
+                    self.evidence = EvidenceReport(unproven=[reason])
+            if changes.changed or changes.added or changes.removed or criteria_changed:
+                self.evidence.compiled.clear()
+                self.evidence.locally_tested.clear()
             return self._dispatch(text)
         except (OSError, ValueError, RuntimeError) as error:
             return SessionReply(f"Não consegui concluir: {error}")
@@ -875,12 +1114,26 @@ class AssistantSession:
         if lowered == "/pdf":
             return self._list_pdfs()
         if lowered == "/desfazer":
-            return SessionReply(self.history.undo_last().reason)
+            reply = self.history.undo_last()
+            self.memory.reconcile_sources()
+            if reply.undone:
+                self.evidence.compiled.clear()
+                self.evidence.locally_tested.clear()
+            return SessionReply(reply.reason)
         if lowered == "/relatorio":
             return SessionReply(self.evidence.render())
+        if lowered == "/contrato":
+            return SessionReply(self._render_contract())
+        if lowered == "/alteracoes":
+            return SessionReply(self.history.render_changes())
+        if lowered == "/estado":
+            self.memory.reconcile_sources()
+            return SessionReply(self.memory.status_summary())
+        if lowered == "/memoria":
+            return SessionReply(self.memory.build_context("", max_chars=4000))
         if lowered == "/ajuda":
             return SessionReply(
-                "Comandos: /enunciado, /pdf, /desfazer, /relatorio, /ajuda e /sair."
+                "Comandos: /enunciado, /pdf, /contrato, /alteracoes, /estado, /memoria, /desfazer, /relatorio, /ajuda e /sair."
             )
         if self._awaiting_pdf_choice:
             return self._select_pdf(stripped)

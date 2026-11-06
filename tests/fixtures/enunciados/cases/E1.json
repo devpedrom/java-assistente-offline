@@ -1,0 +1,11 @@
+[
+  {
+    "class_name": "ContaPoupanca",
+    "constructor_args": [100.0, 0.0, 0.5],
+    "steps": [{"method": "render", "args": []}],
+    "method": "getSaldo",
+    "args": [],
+    "expected": 102.0,
+    "evidence": "saldo aumenta em 2%"
+  }
+]

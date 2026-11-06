@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 
@@ -140,8 +141,11 @@ def _validator(classes: Path) -> tuple[bool, str]:
 
     command = [
         "java",
+        "-Dfile.encoding=UTF-8",
+        "-Dstdout.encoding=UTF-8",
+        "-Dstderr.encoding=UTF-8",
         "-cp",
-        f"{classes}{os.pathsep}{FROTA}",
+        f"{FROTA}{os.pathsep}{classes}",
         "Frota",
         "--console",
     ]
@@ -155,7 +159,11 @@ def _validator(classes: Path) -> tuple[bool, str]:
         check=False,
     )
     output = (result.stdout + result.stderr).strip()
-    return result.returncode == 0 and "FALHOU" not in output, output
+    if __package__ in (None, ""):
+        from validator import accepted
+    else:
+        from .validator import accepted
+    return result.returncode == 0 and accepted(output), output
 
 
 def run(name: str, solution: Path | None = None) -> FixtureResult:
@@ -175,14 +183,22 @@ def run(name: str, solution: Path | None = None) -> FixtureResult:
     if solution is None:
         return result
     compiled, classes, diagnostics = _compile(solution)
-    if not compiled:
-        return FixtureResult(
-            result.name, result.contract_ok, False, None, result.untouched, diagnostics or "compilação falhou"
-        )
-    if name == "E5":
-        behavior_ok, output = _validator(classes)
-        return FixtureResult(result.name, result.contract_ok, True, behavior_ok, result.untouched, "" if behavior_ok else output[-400:])
-    return FixtureResult(result.name, result.contract_ok, True, None, result.untouched, "sem juiz de comportamento")
+    try:
+        if not compiled:
+            return FixtureResult(
+                result.name, result.contract_ok, False, None, result.untouched, diagnostics or "compilação falhou"
+            )
+        if name == "E5":
+            behavior_ok, output = _validator(classes)
+            return FixtureResult(result.name, result.contract_ok, True, behavior_ok, result.untouched, "" if behavior_ok else output[-400:])
+        if __package__ in (None, ""):
+            from behavior import check
+        else:
+            from .behavior import check
+        behavior_ok, reason = check(name, solution, expected, _evidence(path).text)
+        return FixtureResult(result.name, result.contract_ok, True, behavior_ok, result.untouched, reason)
+    finally:
+        shutil.rmtree(classes)
 
 
 def _label(value: bool | None) -> str:

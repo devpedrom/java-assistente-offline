@@ -16,6 +16,7 @@ InputFn = Callable[[str], str]
 
 
 class SessionLike(Protocol):
+    resume_message: str
     def handle(self, text: str) -> SessionReply: ...
 
 
@@ -26,6 +27,9 @@ def run_cli(
     session: SessionLike | None = None,
 ) -> int:
     print(f"Assistente Java POO - projeto: {config.project_root}")
+    resume_message = getattr(session, "resume_message", "")
+    if resume_message:
+        print(resume_message)
     while True:
         try:
             text = input_fn("> ").strip()
@@ -87,10 +91,11 @@ def main() -> int:
     try:
         return run_cli(config, session=session)
     finally:
-        session.close()
-        runtime.stop()
+        try:
+            session.close()
+        finally:
+            runtime.stop()
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

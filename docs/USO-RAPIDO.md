@@ -19,12 +19,33 @@ Depois da primeira instalação, para abrir novamente basta executar `java-assis
 
 - `/enunciado`: recebe o enunciado colado como texto; termina com `/fim`.
 - `/pdf`: procura PDFs apenas na pasta atual e permite escolher por número.
-- `/desfazer`: desfaz a última alteração do assistente se o arquivo não foi editado depois.
+- `/contrato`: mostra classes, assinaturas, relacionamentos e incertezas reconhecidas.
+- `/alteracoes`: mostra o diff das alterações registradas pelo assistente.
+- `/estado`: mostra fase, arquivos, última verificação e próxima ação.
+- `/memoria`: mostra um resumo limitado do projeto.
+- `/desfazer`: desfaz a última alteração do assistente, inclusive após reabrir o projeto, se o arquivo não foi editado depois.
 - `/relatorio`: mostra o que veio do PDF/UML, compilou, foi testado e ainda não foi comprovado.
 - `/ajuda`: mostra os comandos.
 - `/sair`: encerra.
 
-Os critérios gerais ficam em `~/.config/java-assistente/CRITERIOS_GERAIS.md`. Reinstalar ou atualizar não sobrescreve esse arquivo nem a memória em `~/.local/state/java-assistente`.
+Os critérios gerais ficam em `~/.config/java-assistente/CRITERIOS_GERAIS.md` e são preservados na reinstalação.
+
+Para corrigir uma classe existente, peça `corrija somente Conta`. O assistente
+altera um corpo de método por vez e preserva atributos, construtores e assinaturas.
+Para restringir a um método, use `corrija somente Conta.total(int)` (informe os
+tipos dos parâmetros quando houver sobrecargas). Cada candidato é compilado em
+temporário antes de gravar; isso não comprova suas regras de negócio.
+
+A memória acompanha o exercício em `.assistente`. Ao abrir o programa novamente,
+o contrato e os resultados ainda válidos são retomados automaticamente; mover a
+pasta preserva a identidade. Edições externas, troca de PDF ou de critérios
+invalidam as verificações afetadas sem alterar seus fontes. O SQLite é apenas
+um cache reconstruível; preserve os JSON/JSONL. A memória global anterior é lida
+somente para migração. Não entregue `.assistente` se a competição aceitar apenas fontes.
+
+Os testes locais são casos inferidos pelo modelo, com limites de tempo. Eles
+podem identificar erros, mas não garantem cobertura de todas as regras nem
+aprovação dos jurados. Confira `/relatorio` e `/contrato` antes de entregar.
 
 Requisito do computador: Linux Mint x86-64 com o `python3` do próprio sistema (3.10 ou superior). Java, modelo, llama.cpp, Poppler e Tesseract seguem dentro do pacote offline.
 

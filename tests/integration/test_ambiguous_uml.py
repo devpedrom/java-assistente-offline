@@ -58,7 +58,8 @@ class AmbiguousUmlTests(unittest.TestCase):
                 continued = session.handle("Resolva")
 
                 self.assertIn("association", resolved.text)
-                self.assertIn("Solução concluída", continued.text)
+                self.assertIn("compilação Java 8 aprovada", continued.text)
+                self.assertIn("não comprovadas", continued.text)
                 self.assertEqual(model.calls, 2)
             finally:
                 session.close()

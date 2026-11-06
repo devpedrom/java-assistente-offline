@@ -64,7 +64,7 @@ class Workspace:
         path = self._resolve(relative)
         if not path.is_file():
             raise FileNotFoundError(path)
-        return path.read_text(encoding="utf-8")
+        return path.read_bytes().decode("utf-8")
 
     def current_hash(self, relative: Path) -> str | None:
         path = self._resolve(relative)
@@ -72,7 +72,7 @@ class Workspace:
             return None
         if not path.is_file():
             raise WorkspacePathError("O destino não é um arquivo regular.")
-        return _digest(path.read_text(encoding="utf-8"))
+        return _digest(path.read_bytes().decode("utf-8"))
 
     def write(self, relative: Path, content: str) -> Change:
         if not isinstance(content, str):
@@ -81,7 +81,7 @@ class Workspace:
         existed_before = path.exists()
         if existed_before and not path.is_file():
             raise WorkspacePathError("O destino não é um arquivo regular.")
-        before_content = path.read_text(encoding="utf-8") if existed_before else None
+        before_content = path.read_bytes().decode("utf-8") if existed_before else None
 
         path.parent.mkdir(parents=True, exist_ok=True)
         resolved_parent = path.parent.resolve(strict=True)

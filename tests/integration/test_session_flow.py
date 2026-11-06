@@ -8,6 +8,7 @@ from java_assistant.java.toolchain import JavaToolchain
 from java_assistant.model.client import ModelReply
 from java_assistant.pdf.extract import PdfEvidence, PdfExtractionError
 from java_assistant.session import AssistantSession
+from java_assistant.uml.models import JavaContract
 
 
 UML = """class Main
@@ -55,6 +56,73 @@ class CapturingModel:
 
 
 class SessionFlowTests(unittest.TestCase):
+    def test_correction_touches_only_requested_class_and_exposes_diff(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            original = "public class Conta { private int saldo; public Conta(){saldo=1;} public int total(){return 1;} }"
+            (project / "Conta.java").write_text(original, encoding="utf-8")
+            untouched = "public class Outra {}"
+            (project / "Outra.java").write_text(untouched, encoding="utf-8")
+            template = root / "criterios.md"
+            template.write_text("Java POO.", encoding="utf-8")
+            model = ScriptedModel(["{return 2;}"])
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model, pdf_extractor=FixedExtractor(""), toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n- saldo: int\n+ Conta()\n+ total(): int\nclass Outra")
+                session.handle("/fim")
+                reply = session.handle("corrija somente Conta")
+                self.assertIn("compilação Java 8 aprovada", reply.text)
+                self.assertEqual(original.replace("return 1", "return 2"), session.workspace.read(Path("Conta.java")))
+                self.assertEqual(untouched, (project / "Outra.java").read_text(encoding="utf-8"))
+                diff = session.handle("/alteracoes").text
+                self.assertIn("--- Conta.java", diff)
+                self.assertIn("+++ Conta.java", diff)
+                self.assertNotIn("Outra.java", diff)
+                self.assertEqual(1, model.calls)
+            finally:
+                session.close()
+
+    def test_guided_judge_repairs_only_failing_class_using_the_same_inferred_cases(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            template = root / "criterios.md"
+            template.write_text("Java POO.", encoding="utf-8")
+            proposal = json.dumps({"cases": [{"class_name": "Conta", "constructor_args": [],
+                "method": "total", "args": [], "expected": 125.0, "evidence": "total devolve 125"}]})
+            model = ScriptedModel([
+                "public class Conta { public Double total(){return 123.0;} }",
+                proposal,
+                "{return 125.0;}",
+            ])
+            session = AssistantSession(
+                config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=model, pdf_extractor=FixedExtractor(""), toolchain=JavaToolchain(project),
+                criteria_template=template,
+            )
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): Double\nRegra: total devolve 125.")
+                session.handle("/fim")
+                reply = session.handle("Resolva")
+                self.assertEqual(3, model.calls)
+                self.assertIn("compilação Java 8 aprovada", reply.text)
+                self.assertTrue(session.evidence.locally_tested)
+                self.assertIn("inferido", session.evidence.locally_tested[0])
+                self.assertTrue(session.evidence.unproven)
+                self.assertEqual(["Conta.java"], [p.name for p in project.glob("*.java")])
+                self.assertEqual([], list(project.rglob("*.class")))
+            finally:
+                session.close()
+
     def test_next_model_call_keeps_the_actual_previous_action(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)
@@ -387,6 +455,162 @@ Crie uma classe Frota (main) que teste os métodos.
 
 
 class PastedEnunciadoTests(unittest.TestCase):
+    def test_descriptive_method_mention_does_not_restrict_class_correction(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): int\n+ outro(): int")
+                session.handle("/fim")
+                source = "public class Conta { public int total(){return 1;} public int outro(){return 7;} }"
+                session.workspace.write(Path("Conta.java"), source)
+                session.model = ScriptedModel(["{return 2;}", "{return 8;}"])
+                reply = session.handle("corrija somente Conta. O total deve retornar 2; "
+                                       "o resultado desse método nesta classe está errado. O outro deve retornar 8.")
+                self.assertIn("compilação Java 8 aprovada", reply.text)
+                self.assertEqual(source.replace("return 1", "return 2").replace("return 7", "return 8"),
+                                 session.workspace.read(Path("Conta.java")))
+            finally:
+                session.close()
+
+    def test_explicit_overload_distinguishes_primitive_from_boxed_type(self):
+        for parameter in ("double", "Double"):
+            with self.subTest(parameter=parameter), TemporaryDirectory() as temp:
+                session = self._session(Path(temp))
+                try:
+                    session.handle("/enunciado")
+                    session.handle("class Conta\n+ total(double): int\n+ total(Double): int")
+                    session.handle("/fim")
+                    source = "public class Conta { public int total(double x){return 1;} public int total(Double x){return 2;} }"
+                    session.workspace.write(Path("Conta.java"), source)
+                    session.model = ScriptedModel(["{return 3;}"])
+                    reply = session.handle(f"corrija somente Conta.total({parameter})")
+                    self.assertIn("compilação Java 8 aprovada", reply.text)
+                    expected = source.replace("return 1" if parameter == "double" else "return 2", "return 3")
+                    self.assertEqual(expected, session.workspace.read(Path("Conta.java")))
+                finally:
+                    session.close()
+
+    def test_nonexistent_primitive_overload_does_not_select_boxed_method(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(Double): int")
+                session.handle("/fim")
+                source = "public class Conta { public int total(Double x){return 1;} }"
+                session.workspace.write(Path("Conta.java"), source)
+                session.model = ScriptedModel(["{return 3;}"])
+                reply = session.handle("corrija somente Conta.total(double)")
+                self.assertIn("sobrecarga", reply.text)
+                self.assertEqual(0, session.model.calls)
+                self.assertEqual(source, session.workspace.read(Path("Conta.java")))
+            finally:
+                session.close()
+
+    def test_natural_method_restriction_never_alters_other_method(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): int\n+ outro(): int")
+                session.handle("/fim")
+                source = "public class Conta { public int total(){return 1;} public int outro(){return 7;} }"
+                session.workspace.write(Path("Conta.java"), source)
+                session.model = ScriptedModel(["{return 2;}", "{return 9;}"])
+                reply = session.handle("corrija somente total de Conta")
+                self.assertIn("compilação Java 8 aprovada", reply.text)
+                self.assertEqual(source.replace("return 1", "return 2"), session.workspace.read(Path("Conta.java")))
+                self.assertEqual(1, session.model.calls)
+            finally:
+                session.close()
+
+    def test_explicit_method_correction_preserves_other_body_and_crlf(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): int\n+ outro(): int")
+                session.handle("/fim")
+                source = "public class Conta {\r\npublic int total(){return 1;}\r\npublic int outro(){return 7;}\r\n}"
+                session.workspace.write(Path("Conta.java"), source)
+                session.model = RecordingScriptedModel(["{return 2;}"])
+                reply = session.handle("corrija somente o método total de Conta")
+                self.assertIn("compilação Java 8 aprovada", reply.text)
+                self.assertEqual(source.replace("return 1", "return 2"), session.workspace.read(Path("Conta.java")))
+                prompt = session.model.message_history[0][-1].content
+                self.assertIn("MODO: CORREÇÃO DE UM CORPO", session.model.message_history[0][0].content)
+                self.assertNotIn("Conta.public", prompt)
+                self.assertTrue(prompt.endswith("Retorne somente o corpo entre { e }, sem assinatura ou outros métodos."))
+                self.assertIn("public int total()", prompt)
+                self.assertIn("{return 1;}", prompt)
+                self.assertIn("somente o corpo", prompt.casefold())
+            finally:
+                session.close()
+
+    def test_invalid_method_response_leaves_source_unchanged(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): int")
+                session.handle("/fim")
+                source = "public class Conta { public int total(){return 1;} }"
+                session.workspace.write(Path("Conta.java"), source)
+                session.model = ScriptedModel(["{return 2;} public int extra(){return 3;}"] * 2)
+                reply = session.handle("corrija somente Conta")
+                self.assertIn("somente o corpo", reply.text)
+                self.assertEqual(source, session.workspace.read(Path("Conta.java")))
+            finally:
+                session.close()
+
+    def test_ambiguous_overload_asks_without_changing_source(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(int): int\n+ total(double): int")
+                session.handle("/fim")
+                source = "public class Conta { public int total(int x){return 1;} public int total(double x){return 2;} }"
+                session.workspace.write(Path("Conta.java"), source)
+                reply = session.handle("corrija somente Conta.total")
+                self.assertIn("sobrecarga", reply.text)
+                self.assertEqual(0, session.model.calls)
+                self.assertEqual(source, session.workspace.read(Path("Conta.java")))
+            finally:
+                session.close()
+
+    def test_faulty_target_is_editable_user_context_not_a_system_instruction(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n+ total(): int")
+                session.handle("/fim")
+                bad_source = "public class Conta { public int total(){return 12345;} }"
+                session.workspace.write(Path("Conta.java"), bad_source)
+                messages = session._generation_messages("Conta", "corrija somente Conta: total deve retornar 2")
+                self.assertNotIn(bad_source, messages[0].content)
+                self.assertIn(bad_source, messages[-1].content)
+                self.assertIn("ERRO A CORRIGIR", messages[-1].content)
+            finally:
+                session.close()
+
+    def test_rule_headings_with_subtitles_keep_other_classes_rules_out(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Raiz\n+ total(): Double\nclass Filho\n+ total(): Double\n"
+                               "Raiz:\nO valor aumenta em 25%.\nFilho: (validar limite)\n"
+                               "O valor é reduzido pela metade.")
+                session.handle("/fim")
+                focused = session._focused_requirements("Filho")
+                self.assertIn("reduzido pela metade", focused)
+                self.assertNotIn("aumenta em 25%", focused)
+            finally:
+                session.close()
+
     def _session(self, root: Path) -> AssistantSession:
         project = root / "projeto"
         project.mkdir()
@@ -414,6 +638,38 @@ class PastedEnunciadoTests(unittest.TestCase):
             finally:
                 session.close()
 
+    def test_contrato_lists_exact_members_inheritance_and_warnings(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session.handle("/enunciado")
+                session.handle("class Conta\n- saldo: Double\n+ Conta(Double)\n"
+                               "+ total(): Double\nclass Especial\n+ Especial(Double)\n"
+                               "Conta <|-- Especial\nConta -- Especial")
+                session.handle("/fim")
+                text = session.handle("/contrato").text
+                self.assertIn("Conta", text)
+                self.assertIn("private saldo: Double", text)
+                self.assertIn("public Conta(arg1: Double)", text)
+                self.assertIn("public total(): Double", text)
+                self.assertIn("Especial extends Conta", text)
+                self.assertIn("Incertezas", text)
+                self.assertIn("confirmação", text)
+                self.assertEqual(0, session.model.calls)
+            finally:
+                session.close()
+
+    def test_contrato_without_enunciado_explains_how_to_load_one(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                text = session.handle("/contrato").text
+                self.assertIn("/enunciado", text)
+                self.assertIn("/pdf", text)
+                self.assertEqual(0, session.model.calls)
+            finally:
+                session.close()
+
     def test_pasted_text_without_classes_asks_instead_of_generating(self) -> None:
         with TemporaryDirectory() as temp:
             session = self._session(Path(temp))
@@ -435,6 +691,19 @@ class PastedEnunciadoTests(unittest.TestCase):
                 reply = session.handle("/sair")
 
                 self.assertTrue(reply.exit_requested)
+            finally:
+                session.close()
+
+    def test_empty_contract_blocks_generation_without_calling_model(self):
+        with TemporaryDirectory() as temp:
+            session = self._session(Path(temp))
+            try:
+                session._contract = JavaContract((), (), ("Nenhuma classe reconhecida.",))
+                reply = session.handle("Resolva")
+                self.assertIn("Nenhuma classe reconhecida", reply.text)
+                self.assertIn("diagrama", reply.text)
+                self.assertEqual(0, session.model.calls)
+                self.assertEqual([], list(session.config.project_root.glob("*.java")))
             finally:
                 session.close()
 

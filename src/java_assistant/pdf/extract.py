@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from typing import Callable
+from .layout import extract_diagram
 
 
 class PdfExtractionError(RuntimeError):
@@ -20,6 +21,7 @@ class PdfEvidence:
     text: str
     source: str
     warnings: tuple[str, ...]
+    diagram_text: str = ""
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -89,20 +91,33 @@ class PdfExtractor:
             text_result = self._run(
                 [self._pdftotext, "-layout", "-enc", "UTF-8", str(pdf), str(text_file)]
             )
+            text = ""
             if text_result.returncode == 0 and text_file.is_file():
                 text = text_file.read_text(encoding="utf-8", errors="replace").strip()
-                if text:
-                    return PdfEvidence(text=text, source="text", warnings=())
 
             prefix = work / "pagina"
             render_result = self._run(
-                [self._pdftoppm, "-png", "-r", "200", str(pdf), str(prefix)]
+                [self._pdftoppm, "-gray", "-r", "140", str(pdf), str(prefix)]
             )
             if render_result.returncode != 0:
+                if text:
+                    return PdfEvidence(text, "text", ("Não foi possível verificar o diagrama por OCR.",))
                 raise PdfExtractionError("Não foi possível renderizar o PDF para OCR.")
 
             page_texts: list[str] = []
-            for image in sorted(work.glob("pagina-*.png")):
+            diagrams: list[str] = []
+            images = sorted(work.glob("pagina-*.pgm")) or sorted(work.glob("pagina-*.png"))
+            for image in images:
+                if image.suffix == ".pgm":
+                    def recognize(crop):
+                        result = self._run([self._tesseract, str(crop), "stdout", "-l", "por+eng", "--psm", "6"])
+                        return result.stdout if result.returncode == 0 else ""
+                    try:
+                        diagram = extract_diagram(image, recognize)
+                    except ValueError as error:
+                        raise PdfExtractionError(f"Não foi possível interpretar o layout: {error}") from error
+                    if diagram:
+                        diagrams.append(diagram)
                 ocr_result = self._run(
                     [self._tesseract, str(image), "stdout", "-l", "por+eng", "tsv"]
                 )
@@ -111,13 +126,17 @@ class PdfExtractor:
                     if page:
                         page_texts.append(page)
 
-            text = "\n\n".join(page_texts).strip()
-            if not text:
+            ocr_text = "\n\n".join(page_texts).strip()
+            if text and not diagrams and not ocr_text:
+                return PdfEvidence(text=text, source="text", warnings=())
+            if not text and not ocr_text and not diagrams:
                 raise PdfExtractionError(
                     "O PDF não possui texto legível e o OCR não encontrou conteúdo."
                 )
             return PdfEvidence(
-                text=text,
-                source="ocr",
-                warnings=("Conteúdo obtido por OCR; confirme nomes e símbolos do UML.",),
+                text=text or ocr_text or "\n\n".join(diagrams),
+                source="text+ocr" if text else "ocr",
+                warnings=(("Conteúdo obtido por OCR; confirme nomes e símbolos do UML.",)
+                          + (("Regras textuais não recuperadas; forneça o texto do enunciado.",) if not text and not ocr_text else ())),
+                diagram_text="\n\n".join(diagrams) or (ocr_text if text else ""),
             )

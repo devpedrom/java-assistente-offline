@@ -2,9 +2,11 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch, Mock
 import unittest
 
 from java_assistant.cli import run_cli
+from java_assistant import cli
 from java_assistant.config import AppConfig
 from java_assistant.session import SessionReply
 
@@ -20,6 +22,36 @@ class SequenceInput:
 
 
 class CliTests(unittest.TestCase):
+    def test_runtime_is_stopped_even_if_final_memory_checkpoint_fails(self):
+        with TemporaryDirectory() as temp:
+            config = AppConfig.load(Path(temp))
+            runtime = Mock(port=1234)
+            session = Mock()
+            session.close.side_effect = OSError("checkpoint falhou")
+            with patch.object(cli.AppConfig, "load", return_value=config), \
+                 patch.dict("os.environ", {"JAVA_ASSISTANT_HOME": temp}), \
+                 patch.object(cli, "LlamaRuntime", return_value=runtime), \
+                 patch.object(cli, "AssistantSession", return_value=session), \
+                 patch.object(cli, "run_cli", return_value=0):
+                with self.assertRaises(OSError):
+                    cli.main()
+            runtime.stop.assert_called_once()
+
+    def test_resume_message_is_printed_once_before_input(self):
+        class ResumedSession:
+            resume_message = "Projeto retomado"
+            def handle(self, text):
+                return SessionReply("Até logo", True)
+
+        with TemporaryDirectory() as temp:
+            output = StringIO()
+            def read(_prompt):
+                self.assertEqual(1, output.getvalue().count("Projeto retomado"))
+                return "/sair"
+            with redirect_stdout(output):
+                run_cli(AppConfig.load(Path(temp)), read, session=ResumedSession())
+            self.assertEqual(1, output.getvalue().count("Projeto retomado"))
+
     def test_routes_commands_through_session_and_prints_reply(self) -> None:
         class FakeSession:
             def __init__(self) -> None:
@@ -65,4 +97,3 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

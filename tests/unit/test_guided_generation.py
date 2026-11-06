@@ -1,13 +1,19 @@
 import unittest
+from java_assistant import session
 
 from java_assistant.session import (
     _diagnostic_guidance,
     _extract_java_source,
+    _required_generation_rules,
     _semantic_issues,
 )
 
 
 class GuidedGenerationTests(unittest.TestCase):
+    def test_failure_owner_is_exact_even_when_class_names_share_a_prefix(self):
+        names = ["Conta", "ContaPoupanca"]
+        self.assertEqual("ContaPoupanca", session._failure_owner(["ContaPoupanca.total: valor divergente"], names))
+        self.assertEqual("ContaPoupanca", session._failure_owner(["Método ausente ou divergente: ContaPoupanca.total"], names))
     def test_extracts_plain_or_fenced_single_class_source(self) -> None:
         plain = "public class Veiculo {}"
         fenced = "```java\npublic class Veiculo {}\n```"
@@ -33,16 +39,12 @@ class GuidedGenerationTests(unittest.TestCase):
                 "public class Veiculo {}\npublic class Carro {}", "Veiculo"
             )
 
-    def test_semantic_checks_reject_wrong_percentage_and_duplicate_parent_effect(self) -> None:
+    def test_percentage_guidance_is_derived_without_rejecting_source_spelling(self) -> None:
         requirements = """REGRAS ESPECÍFICAS DO PDF:
 HATCH:
 calculaVolume aumenta em 100% ou em 50%.
 VERIFICAÇÃO GERAL: não aplique duas vezes efeito de super.
 """
-        wrong = """public class Hatch extends Carro {
-public Double autonomia() { return super.autonomia() * 0.9; }
-public Double calculaVolume(int passageiros) { return bagageiro * 1.1; }
-}"""
         correct = """public class Hatch extends Carro {
 public Double autonomia() { return super.autonomia(); }
 public Double calculaVolume(int passageiros) {
@@ -52,14 +54,17 @@ return (double) bagageiro;
 }
 }"""
 
-        self.assertTrue(_semantic_issues(requirements, wrong))
+        self.assertIn("base * 2.0", "\n".join(_required_generation_rules(requirements)))
         self.assertEqual((), _semantic_issues(requirements, correct))
 
     def test_semantic_checks_distinguish_quarter_from_remaining_three_quarters(self) -> None:
         requirements = "reduzida em um quarto quando houver carga"
 
-        self.assertTrue(_semantic_issues(requirements, "return base * 0.25;"))
-        self.assertEqual((), _semantic_issues(requirements, "return base * 0.75;"))
+        self.assertIn("base * 0.75", "\n".join(_required_generation_rules(requirements)))
+
+    def test_inherited_effect_does_not_have_to_appear_again_in_subclass_source(self):
+        requirements = "A base sofre redução de 10%. A subclasse sofre redução pela metade."
+        self.assertEqual((), _semantic_issues(requirements, "return super.total() * 0.5;"))
 
     def test_semantic_checks_require_explicit_never_greater_invariant(self) -> None:
         requirements = "O peso da carga nunca pode ser maior que a capacidade."

@@ -83,6 +83,7 @@ class JavaToolchain:
         if not sources:
             raise ValueError("Informe ao menos uma fonte Java.")
         resolved = [self._source(source) for source in sources]
+        self.close()
         self._classes_dir = Path(tempfile.mkdtemp(prefix="java-assistente-classes-"))
         command = (
             self.javac,
@@ -114,6 +115,11 @@ class JavaToolchain:
                 self._classes_dir,
                 command,
             )
+
+    def close(self) -> None:
+        if self._classes_dir is not None:
+            shutil.rmtree(self._classes_dir, ignore_errors=True)
+            self._classes_dir = None
 
     def _popen_options(self) -> dict[str, object]:
         if os.name == "nt":
@@ -179,3 +185,26 @@ class JavaToolchain:
             timeout=timeout_s,
             check=False,
         )
+
+    def run_harness(self, class_name: str, source: str, timeout_s: int = 5) -> RunResult:
+        if self._classes_dir is None:
+            raise RuntimeError("Compile o projeto antes de testar.")
+        if not re.fullmatch(r"AssistenteVerificacao[a-f0-9]{32}", class_name):
+            raise ValueError("Nome de arnês inválido.")
+        with tempfile.TemporaryDirectory(prefix="java-assistente-juiz-") as temp:
+            path = Path(temp) / f"{class_name}.java"
+            path.write_text(source, encoding="utf-8")
+            try:
+                result = subprocess.run(
+                    [self.javac, "-encoding", "UTF-8", "--release", "8", "-classpath", str(self._classes_dir),
+                     "-d", str(self._classes_dir), str(path)],
+                    cwd=temp, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=30, check=False,
+                )
+                if result.returncode:
+                    return RunResult(False, result.stdout, result.stderr, result.returncode, False)
+                return self.run(class_name, timeout_s)
+            except subprocess.TimeoutExpired:
+                return RunResult(False, "", "Compilação do arnês excedeu 30s.", None, True)
+            finally:
+                (self._classes_dir / f"{class_name}.class").unlink(missing_ok=True)

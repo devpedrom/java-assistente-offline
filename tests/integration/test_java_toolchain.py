@@ -11,6 +11,16 @@ FIXTURE = Path(__file__).parents[1] / "fixtures" / "java" / "simple"
 
 
 class JavaToolchainIntegrationTests(unittest.TestCase):
+    def test_recompile_and_close_remove_owned_temporary_classes(self):
+        toolchain = JavaToolchain(FIXTURE)
+        first = toolchain.compile([Path("Calculadora.java")])
+        second = toolchain.compile([Path("Calculadora.java")])
+        self.assertFalse(first.classes_dir.exists())
+        self.assertTrue(second.classes_dir.exists())
+        toolchain.close()
+        toolchain.close()
+        self.assertFalse(second.classes_dir.exists())
+
     def test_rejects_absolute_source_even_when_it_is_inside_project(self) -> None:
         with self.assertRaisesRegex(ValueError, "relativo"):
             JavaToolchain(FIXTURE).compile([(FIXTURE / "Main.java").resolve()])

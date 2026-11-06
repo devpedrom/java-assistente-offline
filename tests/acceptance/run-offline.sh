@@ -20,7 +20,7 @@ cp -a "$BUNDLE/." "$WORK/origem/"
 
 START=$(date +%s)
 cd "$WORK/Projeto com acento á"
-FIRST_OUTPUT=$(printf '/sair\n' | timeout 300 "$WORK/origem/instalar.sh")
+FIRST_OUTPUT=$(printf '/enunciado\nclass Conta\n+ total(): int\n/fim\n/sair\n' | timeout 300 "$WORK/origem/instalar.sh")
 printf '%s\n' "$FIRST_OUTPUT"
 case "$FIRST_OUTPUT" in
     *"projeto: $WORK/Projeto com acento á"*) ;;
@@ -31,7 +31,14 @@ case "$FIRST_OUTPUT" in
 esac
 mv "$WORK/origem" "$WORK/origem-removida"
 
-printf '/sair\n' | timeout 300 "$HOME/.local/bin/java-assistente"
+SECOND_OUTPUT=$(printf '/contrato\n/estado\n/sair\n' | timeout 300 "$HOME/.local/bin/java-assistente")
+printf '%s\n' "$SECOND_OUTPUT"
+case "$SECOND_OUTPUT" in
+    *"Projeto retomado"*"Conta"*"Próxima ação"*) ;;
+    *) echo "FALHA: segunda sessão não retomou o contrato." >&2; exit 1 ;;
+esac
+test -s .assistente/projeto.json
+test -s .assistente/requisitos.json
 END=$(date +%s)
 
 ELAPSED=$((END - START))
@@ -45,4 +52,5 @@ if find . -name '*.class' -print -quit | grep -q .; then
 fi
 
 echo "PASS: inicialização offline após remover a origem em $ELAPSED s."
+echo "PASS: contrato retomado em dois processos sem reenviar o enunciado."
 echo "Execute os demais itens de tests/acceptance/checklist.md neste mesmo hardware."

@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
 
 
 _SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class MemoryEvent:
+    kind: str
+    content: str
+    created_at: str
+    pdf_hash: str
 
 
 def pdf_sha256(path: Path) -> str:
@@ -38,15 +47,19 @@ class ProjectStore:
         self.project_id = project_id
 
     @classmethod
-    def open(cls, pdf_hash: str, project_id: str, state_dir: Path) -> "ProjectStore":
+    def open(cls, pdf_hash: str, project_id: str, state_dir: Path, *, database: Path | None = None) -> "ProjectStore":
         if not pdf_hash.strip() or not project_id.strip():
             raise ValueError("PDF e projeto precisam de identificadores não vazios.")
         state_dir.mkdir(parents=True, exist_ok=True)
-        database = state_dir / "memoria.sqlite3"
+        database = database or state_dir / "memoria.sqlite3"
         connection = sqlite3.connect(database, timeout=10)
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        cls._migrate(connection)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            cls._migrate(connection)
+        except BaseException:
+            connection.close()
+            raise
         return cls(connection, pdf_hash, project_id)
 
     @staticmethod
@@ -88,6 +101,19 @@ class ProjectStore:
             self._connection.execute(
                 "INSERT INTO events(pdf_hash, project_id, kind, content) VALUES (?, ?, ?, ?)",
                 (self.pdf_hash, self.project_id, kind.strip(), content.strip()),
+            )
+
+    def events(self) -> tuple[MemoryEvent, ...]:
+        return tuple(MemoryEvent(*row) for row in self._connection.execute(
+            "SELECT kind, content, created_at, pdf_hash FROM events WHERE project_id=? ORDER BY id", (self.project_id,)
+        ))
+
+    def rebuild(self, events) -> None:
+        with self._connection:
+            self._connection.execute("DELETE FROM events WHERE project_id=?", (self.project_id,))
+            self._connection.executemany(
+                "INSERT INTO events(pdf_hash, project_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                ((event.pdf_hash, self.project_id, event.kind, event.content, event.created_at) for event in events),
             )
 
     def summary(self, max_chars: int = 4000) -> str:
