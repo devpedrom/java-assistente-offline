@@ -24,6 +24,36 @@ class SequenceInput:
 
 
 class CliTests(unittest.TestCase):
+    def test_runtime_is_stopped_even_when_session_close_raises(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = AppConfig.load(root)
+            profile = default_profile(root)
+            class Runtime:
+                port = 12345
+                running = False
+                def start(self):
+                    self.running = True
+                def stop(self):
+                    self.running = False
+            runtime = Runtime()
+            class Session:
+                def __init__(self, **kwargs):
+                    pass
+                def close(self):
+                    raise RuntimeError("falha ao fechar sessão")
+            with mock.patch.dict(os.environ, {"JAVA_ASSISTANT_HOME": str(root)}), \
+                 mock.patch("java_assistant.cli.AppConfig.load", return_value=config), \
+                 mock.patch("java_assistant.cli.ensure_profile"), \
+                 mock.patch("java_assistant.cli.load_profile", return_value=profile), \
+                 mock.patch("java_assistant.cli.verify_paths"), \
+                 mock.patch("java_assistant.cli.LlamaRuntime", return_value=runtime), \
+                 mock.patch("java_assistant.cli.AssistantSession", Session), \
+                 mock.patch("java_assistant.cli.run_cli", return_value=0):
+                with self.assertRaisesRegex(RuntimeError, "falha ao fechar sessão"):
+                    main()
+            self.assertFalse(runtime.running)
+
     def test_routes_commands_through_session_and_prints_reply(self) -> None:
         class FakeSession:
             def __init__(self) -> None:
@@ -132,4 +162,3 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

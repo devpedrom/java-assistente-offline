@@ -91,7 +91,12 @@ class AssistantSession:
         )
 
     def close(self) -> None:
-        self._store.close()
+        try:
+            self._store.close()
+        finally:
+            close = getattr(self.toolchain, "close", None)
+            if close is not None:
+                close()
 
     def _contract_text(self) -> str:
         if self._contract is None:

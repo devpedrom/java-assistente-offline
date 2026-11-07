@@ -107,12 +107,13 @@ def main() -> int:
         print(f"Não foi possível iniciar o assistente: {error}")
         return 2
     finally:
-        if session is not None:
-            session.close()
-        if runtime is not None:
-            runtime.stop()
+        try:
+            if session is not None:
+                session.close()
+        finally:
+            if runtime is not None:
+                runtime.stop()
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

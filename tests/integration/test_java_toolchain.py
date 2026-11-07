@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import shutil
 from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
@@ -13,6 +14,30 @@ FIXTURE = Path(__file__).parents[1] / "fixtures" / "java" / "simple"
 
 
 class JavaToolchainIntegrationTests(unittest.TestCase):
+    def test_recompile_and_close_remove_only_owned_class_directories(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            libraries = root / "bibliotecas"
+            libraries.mkdir()
+            (libraries / "preservar.txt").write_bytes(b"externo")
+            source = root / "Main.java"
+            source.write_bytes(b'public class Main { public static void main(String[] args){System.out.print("ok");} }')
+            toolchain = JavaToolchain(root, classpath=(libraries,))
+            first = toolchain.compile([Path("Main.java")])
+            self.addCleanup(shutil.rmtree, first.classes_dir, ignore_errors=True)
+            second = toolchain.compile([Path("Main.java")])
+            self.addCleanup(shutil.rmtree, second.classes_dir, ignore_errors=True)
+            self.assertTrue(first.success, first.diagnostics)
+            self.assertTrue(second.success, second.diagnostics)
+            self.assertFalse(first.classes_dir.exists())
+            self.assertEqual("ok", toolchain.run("Main", 3).stdout)
+            toolchain.close()
+            toolchain.close()
+            self.assertFalse(second.classes_dir.exists())
+            self.assertTrue(source.is_file())
+            self.assertEqual(b"externo", (libraries / "preservar.txt").read_bytes())
+            self.assertEqual([], list(root.rglob("*.class")))
+
     def test_rejects_absolute_source_even_when_it_is_inside_project(self) -> None:
         with self.assertRaisesRegex(ValueError, "relativo"):
             JavaToolchain(FIXTURE).compile([(FIXTURE / "Main.java").resolve()])

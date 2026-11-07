@@ -1,9 +1,11 @@
 from dataclasses import replace
 import json
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from unittest import mock
 
 from java_assistant.config import AppConfig
 from java_assistant.java.toolchain import JavaToolchain
@@ -62,6 +64,40 @@ class CapturingModel:
 
 
 class SessionFlowTests(unittest.TestCase):
+    def test_session_close_releases_classes_even_when_store_close_fails(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "projeto"
+            project.mkdir()
+            template = root / "criterios.md"
+            template.write_bytes(b"Java POO.")
+            (project / "Conta.java").write_bytes(b"public class Conta {}")
+            toolchain = JavaToolchain(project)
+            session = AssistantSession(config=AppConfig(project, root / "data", root / "config", root / "state"),
+                model=ScriptedModel([]), pdf_extractor=FixedExtractor(""), toolchain=toolchain,
+                criteria_template=template, profile=profile_for(root))
+            try:
+                result = toolchain.compile([Path("Conta.java")])
+                self.addCleanup(shutil.rmtree, result.classes_dir, ignore_errors=True)
+                self.assertTrue(result.success, result.diagnostics)
+                with mock.patch.object(session._store, "close", side_effect=RuntimeError("falha ao fechar memória")):
+                    with self.assertRaisesRegex(RuntimeError, "falha ao fechar memória"):
+                        session.close()
+                self.assertFalse(result.classes_dir.exists())
+            finally:
+                session.close()
+
+    def test_session_close_keeps_support_for_toolchain_without_close(self):
+        from tests.integration.test_solver import FakeToolchain
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            template = root / "criterios.md"
+            template.write_bytes(b"Java POO.")
+            session = AssistantSession(config=AppConfig(root, root / "data", root / "config", root / "state"),
+                model=ScriptedModel([]), pdf_extractor=FixedExtractor(""), toolchain=FakeToolchain(),
+                criteria_template=template, profile=profile_for(root))
+            session.close()
+
     def test_next_model_call_keeps_the_actual_previous_action(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)

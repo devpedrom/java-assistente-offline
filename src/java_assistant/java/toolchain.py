@@ -76,6 +76,7 @@ class JavaToolchain:
         if not sources:
             raise ValueError("Informe ao menos uma fonte Java.")
         resolved = [self._source(source) for source in sources]
+        self.close()
         self._classes_dir = Path(tempfile.mkdtemp(prefix="java-assistente-classes-"))
         command = (
             self.javac,
@@ -108,6 +109,11 @@ class JavaToolchain:
                 self._classes_dir,
                 command,
             )
+
+    def close(self) -> None:
+        if self._classes_dir is not None:
+            shutil.rmtree(self._classes_dir, ignore_errors=True)
+            self._classes_dir = None
 
     def _popen_options(self) -> dict[str, object]:
         if os.name == "nt":
