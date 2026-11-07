@@ -75,7 +75,37 @@ class Workspace:
             return None
         if not path.is_file():
             raise WorkspacePathError("O destino não é um arquivo regular.")
-        return _digest(path.read_bytes().decode("utf-8"))
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def snapshot(self, paths: list[Path] | None = None) -> dict[Path, str | None]:
+        # shortcut: hashes por pedido; limitar inventário se exercícios incluírem artefatos grandes.
+        if paths is None:
+            paths = [path.relative_to(self.root) for path in self.root.rglob("*") if path.is_file()]
+        result = {}
+        for relative in paths:
+            if ".assistente" in relative.parts:
+                continue
+            try:
+                canonical = self._resolve(relative).relative_to(self.root)
+            except WorkspacePathError:
+                continue
+            if ".assistente" in canonical.parts:
+                continue
+            result[canonical] = self.current_hash(canonical)
+        return result
+
+    def expected_content(self, relative: Path, snapshot: dict[Path, str | None]) -> str | None:
+        canonical = self._resolve(relative).relative_to(self.root)
+        if ".assistente" in Path(relative).parts or ".assistente" in canonical.parts:
+            raise WorkspacePathError("A memória .assistente existente deve ser preservada.")
+        content = self.read(canonical) if self._resolve(canonical).exists() else None
+        if (_digest(content) if content is not None else None) != snapshot.get(canonical):
+            raise PatchMismatchError(f"O arquivo {relative} mudou; a edição externa foi preservada.")
+        return content
 
     def write(self, relative: Path, content: str, *, expected=_UNCONDITIONAL) -> Change:
         if not isinstance(content, str):

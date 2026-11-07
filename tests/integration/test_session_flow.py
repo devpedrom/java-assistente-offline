@@ -64,6 +64,36 @@ class CapturingModel:
 
 
 class SessionFlowTests(unittest.TestCase):
+    def test_chat_write_stops_on_external_edit_or_creation_during_inference(self):
+        for initial in (None, b"original\r\n"):
+            with self.subTest(initial=initial), TemporaryDirectory() as temp:
+                root = Path(temp)
+                project = root / "projeto"
+                project.mkdir()
+                target = project / "Auxiliar.java"
+                if initial is not None:
+                    target.write_bytes(initial)
+                template = root / "criterios.md"
+                template.write_bytes(b"Java POO.")
+                class EditingModel(ScriptedModel):
+                    def complete(self, messages):
+                        if self.calls == 0:
+                            target.write_bytes(b"EXTERNAL\r\n")
+                        return super().complete(messages)
+                model = EditingModel(['<write_file path="Auxiliar.java">class Auxiliar {}</write_file>',
+                                      '<respond>Pronto.</respond>'])
+                session = AssistantSession(config=AppConfig(project, root / "data", root / "config", root / "state"),
+                    model=model, pdf_extractor=FixedExtractor(""), toolchain=JavaToolchain(project),
+                    criteria_template=template, profile=profile_for(root))
+                try:
+                    reply = session.handle("Ajuste Auxiliar.java")
+                    self.assertIn("mudou", reply.text)
+                    self.assertEqual(b"EXTERNAL\r\n", target.read_bytes())
+                    self.assertEqual(1, model.calls)
+                    self.assertFalse(session.history.undo_last().undone)
+                finally:
+                    session.close()
+
     def test_session_close_releases_classes_even_when_store_close_fails(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)

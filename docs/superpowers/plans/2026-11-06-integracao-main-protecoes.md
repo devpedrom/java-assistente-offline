@@ -40,6 +40,13 @@
 
 **Interfaces:** `Workspace.write(relative, content, *, expected=<sentinela>) -> Change`: sentinela mantém comportamento incondicional; str exige correspondência exata; None exige arquivo ausente. `History.write(relative, content, *, expected=<sentinela>) -> Change` registra só depois da escrita. `record` continua disponível para chamadores existentes.
 
+Após a revisão, acrescentar `Workspace.snapshot(paths=None) -> dict[Path, str|None]`
+e `expected_content(relative, snapshot) -> str|None` como guarda compartilhada
+do pedido. O solver captura todos os alvos antes da primeira inferência; o chat
+captura os hashes dos arquivos antes de conhecer a ação. Atualizar expectativas
+somente após escrita do assistente e propagar conflito até a saída da operação,
+sem fallback de restauração. Excluir `.assistente` do inventário e da escrita.
+
 - [ ] Criar testes que exijam read/undo byte-exatos com emoji e CRLF; alteração apenas de newline muda o hash e impede undo. Asserções sobre read_bytes, não read_text normalizado.
 - [ ] Criar testes de escrita com conteúdo esperado errado, arquivo criado durante geração e edição durante fsync/preparação do temporário: PatchMismatchError, edição preservada, nenhum .tmp/novo histórico.
 - [ ] Criar regressão no solver com modelo que edita/cria o alvo durante complete(): fonte externo preservado e geração interrompida claramente; não consumir tentativas extras para sobrescrever.

@@ -1,8 +1,10 @@
 from pathlib import Path
 import shutil
+import os
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from java_assistant.adapters.base import CompileResult, RunResult
 from java_assistant.adapters.java8 import Java8Adapter
@@ -121,6 +123,62 @@ class JavaPromptAdapter(Java8Adapter):
 
 
 class SolverTests(unittest.TestCase):
+    def test_repair_conflict_does_not_restore_over_external_edit(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            solver, _, toolchain, _ = self._solver(root, trusted(unit("Conta")), replies=[],
+                toolchain=FakeToolchain(run_outputs=["✔ Conta A\n❌ Conta B", "❌ Conta A\n❌ Conta B"]),
+                checkers=("Validador",), repair_attempts=1)
+            class EditingModel(FakeModel):
+                def complete(self, messages):
+                    if len(self.calls) == 1:
+                        (root / "Conta.txt").write_bytes(b"EXTERNAL\r\n")
+                    return super().complete(messages)
+            model = EditingModel(["BEST", "IGNORED"])
+            solver.model = model
+            outcome = solver.run("resolva")
+            self.assertFalse(outcome.completed)
+            self.assertIn("mudou", outcome.text)
+            self.assertEqual(b"EXTERNAL\r\n", (root / "Conta.txt").read_bytes())
+            self.assertEqual(2, len(model.calls))
+            self.assertEqual(["Validador"], toolchain.runs)
+
+    def test_restoration_rechecks_sources_before_replace(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            solver, _, _, _ = self._solver(root, trusted(unit("Conta")), replies=["BEST", "WORSE"],
+                toolchain=FakeToolchain(run_outputs=["✔ Conta A\n❌ Conta B", "❌ Conta A\n❌ Conta B"]),
+                checkers=("Validador",), repair_attempts=1)
+            path = root / "Conta.txt"
+            fsync = os.fsync
+            def edited(descriptor):
+                fsync(descriptor)
+                if path.exists() and path.read_bytes() == b"WORSE\n":
+                    path.write_bytes(b"EXTERNAL\r\n")
+            with patch("java_assistant.workspace.files.os.fsync", side_effect=edited):
+                outcome = solver.run("resolva")
+            self.assertFalse(outcome.completed)
+            self.assertIn("mudou", outcome.text)
+            self.assertEqual(b"EXTERNAL\r\n", path.read_bytes())
+            self.assertEqual([], list(root.glob("*.tmp")))
+
+    def test_later_target_created_during_first_generation_is_preserved(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            solver, _, _, _ = self._solver(root, trusted(unit("Conta"), unit("Saldo")), replies=[])
+            class EditingModel(FakeModel):
+                def complete(self, messages):
+                    if not self.calls:
+                        (root / "Saldo.txt").write_bytes(b"EXTERNAL\r\n")
+                    return super().complete(messages)
+            model = EditingModel(["A", "B"])
+            solver.model = model
+            outcome = solver.run("resolva")
+            self.assertFalse(outcome.completed)
+            self.assertIn("mudou", outcome.text)
+            self.assertEqual(b"EXTERNAL\r\n", (root / "Saldo.txt").read_bytes())
+            self.assertEqual(1, len(model.calls))
+
     def test_external_edit_or_creation_during_generation_is_not_overwritten(self):
         for initial in (None, "anterior\r\n"):
             with self.subTest(initial=initial), TemporaryDirectory() as temp:

@@ -259,7 +259,14 @@ class Solver:
                 f"{self.max_files} arquivos por execução. Nada foi gerado nem compilado."
             )
         try:
-            return self._solve_trusted(request, planned, confirmed_entry)
+            outcome = self._solve_trusted(request, planned, confirmed_entry)
+            for relative in self._expected_sources:
+                self.workspace.expected_content(relative, self._expected_sources)
+            return outcome
+        except PatchMismatchError as error:
+            self.evidence.compiled.clear()
+            self.evidence.locally_tested.clear()
+            return self._fail(f"Parei: {error}")
         except ContextBudgetError as error:
             return self._fail(f"Parei antes de gerar: {error}")
 
@@ -274,6 +281,10 @@ class Solver:
                 "correção e, se ainda falharem, a execução decide.",
             )
         written: set[str] = set()
+        self._expected_sources = self.workspace.snapshot([
+            *self._sources(),
+            *(Path(f"{name}{self.adapter.source_extension}") for name in planned.order),
+        ])
         for name in planned.order:
             unit = find_unit(self.spec, name)
             assert unit is not None
@@ -564,7 +575,9 @@ class Solver:
                 return error, passed
             for path, text in sources.items():
                 if self.workspace.read(path) != text:
-                    self.history.write(path, text)
+                    change = self.history.write(path, text,
+                        expected=self.workspace.expected_content(path, self._expected_sources))
+                    self._expected_sources[change.relative_path] = change.after_hash
             compilation = self.toolchain.compile(
                 self._sources(), timeout_s=self.compile_timeout_s
             )
@@ -806,7 +819,7 @@ class Solver:
         keep_current: bool = True,
     ) -> str | None:
         relative = Path(f"{unit.name}{self.adapter.source_extension}")
-        expected = self.workspace.read(relative) if self.workspace._resolve(relative).exists() else None
+        expected = self.workspace.expected_content(relative, self._expected_sources)
         messages = self._unit_prompt(unit, request, rules, diagnostic, keep_current)
         last_error = ""
         for attempt in range(2):
@@ -828,10 +841,8 @@ class Solver:
                             f"{unit.name}: a checagem textual não foi satisfeita "
                             f"({last_error}) e o verificador local decidirá.",
                         )
-                    try:
-                        self.history.write(relative, source, expected=expected)
-                    except PatchMismatchError as error:
-                        return f"Parei ao gerar {relative}: {error}"
+                    change = self.history.write(relative, source, expected=expected)
+                    self._expected_sources[change.relative_path] = change.after_hash
                     written.add(str(relative))
                     return None
             if attempt == 0 and diagnostic:

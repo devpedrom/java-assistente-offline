@@ -12,6 +12,24 @@ from java_assistant.workspace.files import (
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_request_snapshot_does_not_open_existing_assistente_memory(self):
+        memory = self.root / ".assistente" / "projeto.json"
+        memory.parent.mkdir()
+        memory.write_bytes(b"memoria antiga")
+        relative = Path("Conta.java")
+        self.workspace.write(relative, "class Conta {}\r\n")
+        original_open = Path.open
+        def without_memory(path, *args, **kwargs):
+            if ".assistente" in path.relative_to(self.root).parts:
+                raise AssertionError("Memória antiga não deve ser aberta")
+            return original_open(path, *args, **kwargs)
+        with patch.object(Path, "open", new=without_memory):
+            snapshot = self.workspace.snapshot()
+            self.assertEqual("class Conta {}\r\n", self.workspace.expected_content(relative, snapshot))
+            with self.assertRaises(WorkspacePathError):
+                self.workspace.expected_content(Path(".assistente/projeto.json"), snapshot)
+        self.assertEqual(b"memoria antiga", memory.read_bytes())
+
     def test_read_and_previous_content_preserve_utf8_and_crlf_bytes(self):
         relative = Path("Conta.java")
         before = 'class Conta {\r\nString texto = "😀";\r\n}\r\n'

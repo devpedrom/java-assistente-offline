@@ -544,23 +544,27 @@ class AssistantSession:
             raise ValueError(f"Argumento textual obrigatório: {name}")
         return value
 
-    def _execute_action(self, action: Action) -> str:
+    def _execute_action(self, action: Action, *, expected_files: dict[Path, str | None]) -> str:
         if action.tool == "read_file":
             path = self._text_arg(action, "path")
             return self.workspace.read(Path(path))
         if action.tool == "write_file":
             path = self._text_arg(action, "path")
             content = self._text_arg(action, "content")
-            self.history.write(Path(path), content)
+            change = self.history.write(Path(path), content,
+                expected=self.workspace.expected_content(Path(path), expected_files))
+            expected_files[change.relative_path] = change.after_hash
             self._store.remember("change", f"Arquivo escrito: {path}")
             return f"Arquivo salvo: {path}"
         if action.tool == "apply_patch":
             path = self._text_arg(action, "path")
-            self.history.write(
+            self.workspace.expected_content(Path(path), expected_files)
+            change = self.history.write(
                 Path(path),
                 self._text_arg(action, "replacement"),
                 expected=self._text_arg(action, "expected"),
             )
+            expected_files[change.relative_path] = change.after_hash
             self._store.remember("change", f"Arquivo ajustado: {path}")
             return f"Arquivo ajustado: {path}"
         if action.tool == "compile_java":
@@ -644,6 +648,7 @@ class AssistantSession:
                 return SessionReply(confirmation_text(self._contract, status))
         initial_missing = self._missing_units()
         focused_target = initial_missing[0] if initial_missing else None
+        expected_files = self.workspace.snapshot()
         try:
             messages = build_context(
                 criteria=load_criteria(self.config),
@@ -735,7 +740,11 @@ class AssistantSession:
                 )
             actions_used += 1
             try:
-                result = self._execute_action(action)
+                result = self._execute_action(action, expected_files=expected_files)
+            except PatchMismatchError as exc:
+                self.evidence.compiled.clear()
+                self.evidence.locally_tested.clear()
+                return SessionReply(f"Parei: {exc}")
             except (OSError, ValueError, PatchMismatchError, RuntimeError) as exc:
                 result = f"AÇÃO RECUSADA OU FALHOU: {exc}"
             if action.tool in {"write_file", "apply_patch"}:
