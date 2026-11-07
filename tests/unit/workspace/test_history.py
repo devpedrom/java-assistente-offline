@@ -2,11 +2,34 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from java_assistant.workspace.files import Workspace
+from java_assistant.workspace.files import Workspace, PatchMismatchError
 from java_assistant.workspace.history import History
 
 
 class HistoryTests(unittest.TestCase):
+    def test_undo_restores_exact_crlf_and_unicode_bytes(self):
+        relative = Path("Conta.java")
+        before = 'class Conta {\r\nString valor="😀";\r\n}\r\n'
+        self.workspace.write(relative, before)
+        self.history.record(self.workspace.write(relative, before.replace("valor", "nome")))
+        self.assertTrue(self.history.undo_last().undone)
+        self.assertEqual(before.encode("utf-8"), (self.root / relative).read_bytes())
+
+    def test_newline_only_external_edit_blocks_undo(self):
+        relative = Path("Conta.java")
+        self.history.record(self.workspace.write(relative, "original\r\n"))
+        (self.root / relative).write_bytes(b"original\n")
+        self.assertFalse(self.history.undo_last().undone)
+        self.assertEqual(b"original\n", (self.root / relative).read_bytes())
+
+    def test_rejected_conditional_write_does_not_add_an_undo_entry(self):
+        relative = Path("Conta.java")
+        self.workspace.write(relative, "externo")
+        with self.assertRaises(PatchMismatchError):
+            self.history.write(relative, "gerado", expected="antigo")
+        self.assertFalse(self.history.undo_last().undone)
+        self.assertEqual(b"externo", (self.root / relative).read_bytes())
+
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

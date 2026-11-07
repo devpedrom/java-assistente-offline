@@ -16,7 +16,7 @@ from ..adapters.base import LanguageAdapter, Toolchain
 from ..memory.store import ProjectStore
 from ..model.client import Message, ModelReply, ModelProtocolError
 from ..review.report import EvidenceReport
-from ..workspace.files import Workspace
+from ..workspace.files import Workspace, PatchMismatchError
 from ..workspace.history import History
 
 
@@ -564,7 +564,7 @@ class Solver:
                 return error, passed
             for path, text in sources.items():
                 if self.workspace.read(path) != text:
-                    self.history.record(self.workspace.write(path, text))
+                    self.history.write(path, text)
             compilation = self.toolchain.compile(
                 self._sources(), timeout_s=self.compile_timeout_s
             )
@@ -805,9 +805,9 @@ class Solver:
         written: set[str],
         keep_current: bool = True,
     ) -> str | None:
-        messages = self._unit_prompt(unit, request, rules, diagnostic, keep_current)
-
         relative = Path(f"{unit.name}{self.adapter.source_extension}")
+        expected = self.workspace.read(relative) if self.workspace._resolve(relative).exists() else None
+        messages = self._unit_prompt(unit, request, rules, diagnostic, keep_current)
         last_error = ""
         for attempt in range(2):
             reply = self.model.complete(messages)
@@ -828,8 +828,10 @@ class Solver:
                             f"{unit.name}: a checagem textual não foi satisfeita "
                             f"({last_error}) e o verificador local decidirá.",
                         )
-                    change = self.workspace.write(relative, source)
-                    self.history.record(change)
+                    try:
+                        self.history.write(relative, source, expected=expected)
+                    except PatchMismatchError as error:
+                        return f"Parei ao gerar {relative}: {error}"
                     written.add(str(relative))
                     return None
             if attempt == 0 and diagnostic:

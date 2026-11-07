@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .files import Change, Workspace
+from .files import Change, Workspace, PatchMismatchError, _digest, _UNCONDITIONAL
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,11 @@ class History:
     def record(self, change: Change) -> None:
         self._changes.append(change)
 
+    def write(self, relative: Path, content: str, *, expected=_UNCONDITIONAL) -> Change:
+        change = self._workspace.write(relative, content, expected=expected)
+        self.record(change)
+        return change
+
     def undo_last(self) -> UndoResult:
         if not self._changes:
             return UndoResult(False, "Nenhuma alteração do assistente para desfazer.")
@@ -34,7 +39,13 @@ class History:
 
         if change.existed_before:
             assert change.before_content is not None
-            self._workspace.write(change.relative_path, change.before_content)
+            current = self._workspace.read(change.relative_path)
+            if _digest(current) != change.after_hash:
+                return UndoResult(False, "O arquivo mudou durante o desfazer.")
+            try:
+                self._workspace.write(change.relative_path, change.before_content, expected=current)
+            except PatchMismatchError:
+                return UndoResult(False, "O arquivo mudou durante o desfazer.")
         else:
             removed = self._workspace.remove_if_hash(
                 change.relative_path, change.after_hash

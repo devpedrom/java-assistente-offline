@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from java_assistant.workspace.files import (
     PatchMismatchError,
@@ -11,6 +12,38 @@ from java_assistant.workspace.files import (
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_read_and_previous_content_preserve_utf8_and_crlf_bytes(self):
+        relative = Path("Conta.java")
+        before = 'class Conta {\r\nString texto = "😀";\r\n}\r\n'
+        self.workspace.write(relative, before)
+        self.assertEqual(before, self.workspace.read(relative))
+        change = self.workspace.write(relative, before.replace("texto", "nome"))
+        self.assertEqual(before, change.before_content)
+        self.assertEqual(before.replace("texto", "nome").encode("utf-8"), (self.root / relative).read_bytes())
+
+    def test_conditional_write_requires_expected_content_or_absence(self):
+        relative = Path("Conta.java")
+        self.workspace.write(relative, "primeiro", expected=None)
+        for expected in (None, "desatualizado"):
+            with self.subTest(expected=expected), self.assertRaises(PatchMismatchError):
+                self.workspace.write(relative, "não gravar", expected=expected)
+            self.assertEqual(b"primeiro", (self.root / relative).read_bytes())
+        self.workspace.write(relative, "segundo", expected="primeiro")
+        self.assertEqual(b"segundo", (self.root / relative).read_bytes())
+
+    def test_external_edit_during_fsync_preserves_edit_and_removes_temporary(self):
+        relative = Path("Conta.java")
+        self.workspace.write(relative, "original")
+        fsync = os.fsync
+        def edited(descriptor):
+            fsync(descriptor)
+            (self.root / relative).write_bytes(b"externo")
+        with patch("java_assistant.workspace.files.os.fsync", side_effect=edited):
+            with self.assertRaises(PatchMismatchError):
+                self.workspace.apply_patch(relative, "original", "gerado")
+        self.assertEqual(b"externo", (self.root / relative).read_bytes())
+        self.assertEqual([], list(self.root.rglob("*.tmp")))
+
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

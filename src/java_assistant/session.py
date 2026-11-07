@@ -546,18 +546,16 @@ class AssistantSession:
         if action.tool == "write_file":
             path = self._text_arg(action, "path")
             content = self._text_arg(action, "content")
-            change = self.workspace.write(Path(path), content)
-            self.history.record(change)
+            self.history.write(Path(path), content)
             self._store.remember("change", f"Arquivo escrito: {path}")
             return f"Arquivo salvo: {path}"
         if action.tool == "apply_patch":
             path = self._text_arg(action, "path")
-            change = self.workspace.apply_patch(
+            self.history.write(
                 Path(path),
-                self._text_arg(action, "expected"),
                 self._text_arg(action, "replacement"),
+                expected=self._text_arg(action, "expected"),
             )
-            self.history.record(change)
             self._store.remember("change", f"Arquivo ajustado: {path}")
             return f"Arquivo ajustado: {path}"
         if action.tool == "compile_java":

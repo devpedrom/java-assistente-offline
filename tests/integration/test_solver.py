@@ -121,6 +121,28 @@ class JavaPromptAdapter(Java8Adapter):
 
 
 class SolverTests(unittest.TestCase):
+    def test_external_edit_or_creation_during_generation_is_not_overwritten(self):
+        for initial in (None, "anterior\r\n"):
+            with self.subTest(initial=initial), TemporaryDirectory() as temp:
+                root = Path(temp)
+                path = root / "Conta.txt"
+                if initial is not None:
+                    path.write_bytes(initial.encode("utf-8"))
+                solver, _, toolchain, _ = self._solver(root, trusted(unit("Conta")), replies=[])
+                class EditingModel(FakeModel):
+                    def complete(self, messages):
+                        path.write_bytes(b"externo\r\n")
+                        return super().complete(messages)
+                model = EditingModel(["gerado"])
+                solver.model = model
+                outcome = solver.run("resolva")
+                self.assertFalse(outcome.completed)
+                self.assertIn("mudou", outcome.text)
+                self.assertEqual(b"externo\r\n", path.read_bytes())
+                self.assertEqual(1, len(model.calls))
+                self.assertEqual([], toolchain.compiled)
+                self.assertFalse(solver.history.undo_last().undone)
+
 
 
     def test_last_repair_is_evaluated_when_budget_ends_midway_through_targets(self):

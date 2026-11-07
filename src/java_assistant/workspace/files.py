@@ -18,9 +18,10 @@ class PatchMismatchError(ValueError):
 
 
 def _digest(content: str) -> str:
-    # read_text normaliza quebras de linha; o hash precisa usar a mesma forma.
-    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+_UNCONDITIONAL = object()
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ class Workspace:
         path = self._resolve(relative)
         if not path.is_file():
             raise FileNotFoundError(path)
-        return path.read_text(encoding="utf-8")
+        return path.read_bytes().decode("utf-8")
 
     def current_hash(self, relative: Path) -> str | None:
         path = self._resolve(relative)
@@ -74,16 +75,18 @@ class Workspace:
             return None
         if not path.is_file():
             raise WorkspacePathError("O destino não é um arquivo regular.")
-        return _digest(path.read_text(encoding="utf-8"))
+        return _digest(path.read_bytes().decode("utf-8"))
 
-    def write(self, relative: Path, content: str) -> Change:
+    def write(self, relative: Path, content: str, *, expected=_UNCONDITIONAL) -> Change:
         if not isinstance(content, str):
             raise TypeError("O conteúdo precisa ser texto.")
         path = self._resolve(relative)
         existed_before = path.exists()
         if existed_before and not path.is_file():
             raise WorkspacePathError("O destino não é um arquivo regular.")
-        before_content = path.read_text(encoding="utf-8") if existed_before else None
+        before_content = path.read_bytes().decode("utf-8") if existed_before else None
+        if expected is not _UNCONDITIONAL and before_content != expected:
+            raise PatchMismatchError("O arquivo mudou; a edição externa foi preservada.")
 
         path.parent.mkdir(parents=True, exist_ok=True)
         resolved_parent = path.parent.resolve(strict=True)
@@ -101,6 +104,10 @@ class Workspace:
                 handle.write(content)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if expected is not _UNCONDITIONAL:
+                current = self.read(relative) if self._resolve(relative).exists() else None
+                if current != expected:
+                    raise PatchMismatchError("O arquivo mudou; a edição externa foi preservada.")
             os.replace(temporary, path)
         except BaseException:
             temporary.unlink(missing_ok=True)
@@ -115,12 +122,7 @@ class Workspace:
         )
 
     def apply_patch(self, relative: Path, expected: str, replacement: str) -> Change:
-        current = self.read(relative)
-        if current != expected:
-            raise PatchMismatchError(
-                "O arquivo mudou ou o trecho esperado não corresponde exatamente."
-            )
-        return self.write(relative, replacement)
+        return self.write(relative, replacement, expected=expected)
 
     def remove_if_hash(self, relative: Path, expected_hash: str) -> bool:
         path = self._resolve(relative)
